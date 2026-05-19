@@ -75,6 +75,8 @@ export function createBlocksFromText(input: string): ContentBlock[] {
       return;
     }
 
+    addDividerAfterTitleIfNeeded(blocks);
+
     if (isHeading) {
       addDividerIfNeeded(blocks);
       blocks.push(makeBlock("h3", cleanPrefix(line.text)));
@@ -236,6 +238,13 @@ function scoreUnderlineSentence(sentence: string, index: number, total: number) 
 function addDividerIfNeeded(blocks: ContentBlock[]) {
   const last = blocks[blocks.length - 1];
   if (last && last.type !== "hr" && blocks.some((block) => block.type !== "h1")) {
+    blocks.push(makeBlock("hr"));
+  }
+}
+
+function addDividerAfterTitleIfNeeded(blocks: ContentBlock[]) {
+  const last = blocks[blocks.length - 1];
+  if (last?.type === "h1") {
     blocks.push(makeBlock("hr"));
   }
 }

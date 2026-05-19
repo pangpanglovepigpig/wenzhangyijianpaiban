@@ -20,20 +20,37 @@ type DrawTextOptions = {
   underline?: boolean;
 };
 
+export type ExportedImage = {
+  id: string;
+  name: string;
+  url: string;
+  blob: Blob;
+  file: File;
+};
+
 export async function exportPagesToPng(pages: PageModel[]) {
-  return pages.map((page, index) => ({
-    id: page.id,
-    name: `xiaohongshu-note-${String(index + 1).padStart(2, "0")}.png`,
-    url: drawPage(page),
-  }));
+  return Promise.all(
+    pages.map(async (page, index) => {
+      const name = `xiaohongshu-note-${String(index + 1).padStart(2, "0")}.png`;
+      const blob = await drawPage(page);
+
+      return {
+        id: page.id,
+        name,
+        url: URL.createObjectURL(blob),
+        blob,
+        file: new File([blob], name, { type: "image/png" }),
+      };
+    }),
+  );
 }
 
-function drawPage(page: PageModel): string {
+async function drawPage(page: PageModel): Promise<Blob> {
   const canvas = document.createElement("canvas");
   canvas.width = WIDTH * EXPORT_SCALE;
   canvas.height = HEIGHT * EXPORT_SCALE;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return "";
+  if (!ctx) throw new Error("Canvas is unavailable.");
   ctx.scale(EXPORT_SCALE, EXPORT_SCALE);
 
   paintBackground(ctx);
@@ -54,7 +71,20 @@ function drawPage(page: PageModel): string {
     y += usedHeight + getBlockGap(block);
   });
 
-  return canvas.toDataURL("image/png");
+  return canvasToBlob(canvas);
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+
+      reject(new Error("PNG export failed."));
+    }, "image/png");
+  });
 }
 
 function paintBackground(ctx: CanvasRenderingContext2D) {
@@ -108,9 +138,9 @@ function drawNotesChrome(ctx: CanvasRenderingContext2D) {
 function getTextOptions(block: ContentBlock, y: number): DrawTextOptions {
   if (block.type === "h1") {
     return {
-      font: "700 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif",
+      font: "700 19px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif",
       color: "#2d2d2f",
-      lineHeight: 29,
+      lineHeight: 28,
       maxWidth: CONTENT_WIDTH,
       x: PADDING_X,
       y,
@@ -119,9 +149,9 @@ function getTextOptions(block: ContentBlock, y: number): DrawTextOptions {
 
   if (block.type === "h3") {
     return {
-      font: "700 17px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif",
+      font: "700 16.5px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif",
       color: "#2d2d2f",
-      lineHeight: 25,
+      lineHeight: 24,
       maxWidth: CONTENT_WIDTH,
       x: PADDING_X,
       y,
@@ -129,9 +159,9 @@ function getTextOptions(block: ContentBlock, y: number): DrawTextOptions {
   }
 
   return {
-    font: "400 17px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif",
+    font: "400 16.5px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif",
     color: "#2d2d2f",
-    lineHeight: 28,
+    lineHeight: 27,
     maxWidth: CONTENT_WIDTH,
     x: PADDING_X,
     y,
@@ -151,7 +181,7 @@ function drawWrappedText(ctx: CanvasRenderingContext2D, text: string, options: D
     lines.forEach((line, index) => {
       const lineWidth = ctx.measureText(line).width;
       const y = options.y + index * options.lineHeight + 2;
-      ctx.fillRect(options.x - 3, y, Math.min(lineWidth + 6, options.maxWidth + 6), 22);
+      ctx.fillRect(options.x - 3, y, Math.min(lineWidth + 6, options.maxWidth + 6), 21);
     });
     ctx.fillStyle = options.color;
   }
@@ -169,19 +199,23 @@ function drawWrappedText(ctx: CanvasRenderingContext2D, text: string, options: D
 }
 
 function drawWavyUnderline(ctx: CanvasRenderingContext2D, x: number, y: number, width: number) {
-  const amplitude = 2;
-  const wavelength = 8;
+  const amplitude = 1.35;
+  const halfWave = 4;
+  const endX = x + width;
 
   ctx.save();
   ctx.strokeStyle = "#d93025";
-  ctx.lineWidth = 1.6;
+  ctx.lineWidth = 1.2;
   ctx.lineCap = "round";
+  ctx.lineJoin = "round";
   ctx.beginPath();
   ctx.moveTo(x, y);
 
-  for (let currentX = x; currentX <= x + width; currentX += 2) {
-    const progress = (currentX - x) / wavelength;
-    ctx.lineTo(currentX, y + Math.sin(progress * Math.PI * 2) * amplitude);
+  for (let currentX = x; currentX < endX; currentX += halfWave * 2) {
+    const midX = Math.min(currentX + halfWave, endX);
+    const nextX = Math.min(currentX + halfWave * 2, endX);
+    ctx.quadraticCurveTo(currentX + halfWave / 2, y - amplitude, midX, y);
+    ctx.quadraticCurveTo(currentX + halfWave * 1.5, y + amplitude, nextX, y);
   }
 
   ctx.stroke();

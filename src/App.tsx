@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   Download,
@@ -16,16 +16,10 @@ import {
   Underline,
   Upload,
 } from "lucide-react";
-import { exportPagesToPng } from "./exportImage";
+import { exportPagesToPng, type ExportedImage } from "./exportImage";
 import { blocksToMarkdown, createBlocksFromText, IMAGE_CONFIG, makeBlock, sampleArticle } from "./formatter";
 import { paginateBlocks, PAGE_HEIGHT, PAGE_WIDTH } from "./pagination";
 import type { ContentBlock, PageModel } from "./types";
-
-type ExportedImage = {
-  id: string;
-  name: string;
-  url: string;
-};
 
 export function App() {
   const [sourceText, setSourceText] = useState(sampleArticle);
@@ -38,6 +32,13 @@ export function App() {
   const markdown = useMemo(() => blocksToMarkdown(blocks), [blocks]);
   const renderConfig = useMemo(() => ({ ...IMAGE_CONFIG, markdown }), [markdown]);
   const selectedBlock = blocks.find((block) => block.id === selectedId) ?? null;
+  const canShareImages = images.length > 0 && canShareFiles(images);
+
+  useEffect(() => {
+    return () => {
+      images.forEach((image) => URL.revokeObjectURL(image.url));
+    };
+  }, [images]);
 
   useLayoutEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -56,7 +57,7 @@ export function App() {
     const nextBlocks = createBlocksFromText(sourceText);
     setBlocks(nextBlocks);
     setSelectedId(nextBlocks[0]?.id ?? null);
-    setImages([]);
+    clearImages();
   }
 
   function updateBlock(id: string, patch: Partial<ContentBlock>) {
@@ -71,7 +72,7 @@ export function App() {
         return next;
       }),
     );
-    setImages([]);
+    clearImages();
   }
 
   function toggleType(type: ContentBlock["type"]) {
@@ -97,7 +98,7 @@ export function App() {
       return [...current.slice(0, index + 1), divider, ...current.slice(index + 1)];
     });
     setSelectedId(divider.id);
-    setImages([]);
+    clearImages();
   }
 
   function insertTextBlockAfter(id: string) {
@@ -108,29 +109,43 @@ export function App() {
       return [...current.slice(0, index + 1), textBlock, ...current.slice(index + 1)];
     });
     setSelectedId(textBlock.id);
-    setImages([]);
+    clearImages();
   }
 
   function removeBlock(id: string) {
     setBlocks((current) => current.filter((block) => block.id !== id));
     if (selectedId === id) setSelectedId(null);
-    setImages([]);
+    clearImages();
   }
 
   async function exportImages() {
     const nextImages = await exportPagesToPng(pages);
-    setImages(nextImages);
+    setImages((current) => {
+      current.forEach((image) => URL.revokeObjectURL(image.url));
+      return nextImages;
+    });
   }
 
-  function downloadAll() {
+  function clearImages() {
+    setImages((current) => {
+      current.forEach((image) => URL.revokeObjectURL(image.url));
+      return [];
+    });
+  }
+
+  async function saveAllImages() {
+    if (await shareImages(images)) return;
+
     images.forEach((image, index) => {
       window.setTimeout(() => {
-        const anchor = document.createElement("a");
-        anchor.href = image.url;
-        anchor.download = image.name;
-        anchor.click();
+        downloadImage(image);
       }, index * 180);
     });
+  }
+
+  async function saveImage(image: ExportedImage) {
+    if (await shareImages([image])) return;
+    downloadImage(image);
   }
 
   return (
@@ -264,9 +279,9 @@ export function App() {
                 <FileImage size={18} />
                 生成图片
               </button>
-              <button className="secondary-button" onClick={downloadAll} disabled={!images.length}>
+              <button className="secondary-button" onClick={saveAllImages} disabled={!images.length}>
                 <ImageDown size={18} />
-                下载全部
+                {canShareImages ? "保存全部" : "下载全部"}
               </button>
             </div>
           </div>
@@ -283,10 +298,10 @@ export function App() {
           {images.length > 0 && (
             <div className="image-results">
               {images.map((image) => (
-                <a key={image.id} className="download-link" href={image.url} download={image.name}>
+                <button key={image.id} className="download-link" onClick={() => saveImage(image)}>
                   <Download size={16} />
-                  {image.name}
-                </a>
+                  {canShareImages ? `保存 ${image.name}` : image.name}
+                </button>
               ))}
             </div>
           )}
@@ -300,6 +315,36 @@ export function App() {
       </div>
     </main>
   );
+}
+
+function canShareFiles(images: ExportedImage[]) {
+  if (!images.length || typeof navigator.canShare !== "function") return false;
+  return navigator.canShare({ files: images.map((image) => image.file) });
+}
+
+async function shareImages(images: ExportedImage[]) {
+  if (!canShareFiles(images)) return false;
+
+  try {
+    await navigator.share({
+      files: images.map((image) => image.file),
+      title: images.length > 1 ? "小红书排版图片" : images[0].name,
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return true;
+    return false;
+  }
+}
+
+function downloadImage(image: ExportedImage) {
+  const anchor = document.createElement("a");
+  anchor.href = image.url;
+  anchor.download = image.name;
+  anchor.rel = "noopener";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 function NotePage({ blocks }: { blocks: ContentBlock[] }) {

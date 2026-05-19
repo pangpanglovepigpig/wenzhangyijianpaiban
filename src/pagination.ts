@@ -45,7 +45,7 @@ function trimTrailingDivider(blocks: ContentBlock[]) {
 
 function fallbackHeight(block: ContentBlock) {
   if (block.type === "hr") return 29;
-  if (block.type === "h1") return 48;
-  if (block.type === "h3") return 36;
-  return 40;
+  if (block.type === "h1") return 47;
+  if (block.type === "h3") return 35;
+  return 39;
 }
