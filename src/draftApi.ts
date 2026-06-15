@@ -1,12 +1,18 @@
-import { makeBlockFromDraft } from "./formatter";
+import { makeBlockFromDraft, stabilizeAiDraftBlocks } from "./formatter";
 import type { ContentBlock, DraftBlock } from "./types";
 
 type GenerateDraftResponse = {
   blocks?: DraftBlock[];
   error?: string;
+  notice?: string;
 };
 
-export async function generateDraftWithDeepSeek(text: string): Promise<ContentBlock[]> {
+export type GenerateDraftResult = {
+  blocks: ContentBlock[];
+  notice?: string;
+};
+
+export async function generateDraftWithDeepSeek(text: string): Promise<GenerateDraftResult> {
   const response = await fetch("/api/generate-draft", {
     method: "POST",
     headers: {
@@ -25,7 +31,7 @@ export async function generateDraftWithDeepSeek(text: string): Promise<ContentBl
     throw new Error("DeepSeek 没有返回可用的初稿内容。");
   }
 
-  return data.blocks.map((block) =>
+  const draftBlocks = data.blocks.map((block) =>
     makeBlockFromDraft({
       type: block.type,
       text: block.text,
@@ -34,4 +40,9 @@ export async function generateDraftWithDeepSeek(text: string): Promise<ContentBl
       underline: block.underline === true,
     }),
   );
+
+  return {
+    blocks: stabilizeAiDraftBlocks(draftBlocks),
+    notice: data.notice,
+  };
 }

@@ -36,6 +36,7 @@ export function App() {
   const [isPreviewRendering, setIsPreviewRendering] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftNotice, setDraftNotice] = useState<string | null>(null);
   const [isDraftGenerating, setIsDraftGenerating] = useState(false);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
   const [styleSettings, setStyleSettings] = useState<CardStyleSettings>(DEFAULT_CARD_STYLE);
@@ -110,13 +111,15 @@ export function App() {
     draftRequestRef.current = requestId;
     setIsDraftGenerating(true);
     setDraftError(null);
+    setDraftNotice(null);
 
     try {
-      const nextBlocks = await generateDraftWithDeepSeek(sourceText);
+      const result = await generateDraftWithDeepSeek(sourceText);
       if (draftRequestRef.current !== requestId) return;
 
-      setBlocks(nextBlocks);
-      setSelectedId(nextBlocks[0]?.id ?? null);
+      setBlocks(result.blocks);
+      setSelectedId(result.blocks[0]?.id ?? null);
+      setDraftNotice(result.notice ?? null);
       clearImages();
     } catch (error) {
       if (draftRequestRef.current !== requestId) return;
@@ -237,10 +240,12 @@ export function App() {
             onChange={(event) => {
               setSourceText(event.target.value);
               setDraftError(null);
+              setDraftNotice(null);
             }}
             aria-label="文章正文"
           />
 
+          {draftNotice && <div className="draft-notice">{draftNotice}</div>}
           {draftError && <div className="draft-error">{draftError}</div>}
 
           <StyleSettingsPanel settings={styleSettings} cardStyle={cardStyle} onChange={updateStyleSettings} />

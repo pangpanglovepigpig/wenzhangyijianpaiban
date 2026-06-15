@@ -124,6 +124,17 @@ h2 {
   line-height: 1.45;
 }
 
+.draft-notice {
+  margin: -2px 12px 12px;
+  padding: 9px 11px;
+  border: 1px solid #b9d7c8;
+  border-radius: 8px;
+  color: #23624f;
+  background: #f2faf6;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .source-input:focus,
 .block-text:focus,
 .markdown-output textarea:focus,

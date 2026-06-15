@@ -31,6 +31,17 @@ const inlineColorStyles: Record<InlineColor, string> = {
   red: "color: #d93025;",
   blue: "color: #1677ff;",
 };
+const inlineColorMeaningPatterns: Record<InlineColor, RegExp> = {
+  red: /(风险|误区|不要|不能|避免|必须|警告|后果|负面|错误|失败|问题|雷区|小心|注意|千万|别|坑|陷阱|遗漏|截断|降低|失去|减少|变差|损失|浪费|拖慢|出错|失控|焦虑|成本)/,
+  blue:
+    /(方法|步骤|方案|建议|做法|行动|执行|正向|收益|可执行|提升|优化|改善|效果|效率|增长|转化|复盘|清单|路径|策略|原则|工具|流程|解决|完成|搭建|拆|先|再|适合|值得|可以|就能|即可|\d+\s*(个|条|步|点|种|类|分钟|小时|天|倍|%))/,
+};
+const inlineColorSentencePunctuation = /[。！？!?；;]/;
+const maxInlineColorLength = 14;
+const minInlineColorLength = 2;
+const maxInlineColorRatio = 0.45;
+const maxInlineColorSegmentsPerBlock = 2;
+const maxInlineColorCharsPerBlock = 22;
 
 type TextLine = {
   text: string;
@@ -131,6 +142,39 @@ export function createBlocksFromText(input: string): ContentBlock[] {
   }
 
   return compactDividers(blocks);
+}
+
+export function stabilizeAiDraftBlocks(blocks: ContentBlock[]): ContentBlock[] {
+  const normalizedBlocks = blocks
+    .map(prepareAiDraftBlock)
+    .filter((block) => block.type === "hr" || block.text.trim().length > 0);
+
+  const firstTextBlock = normalizedBlocks.find((block) => block.type !== "hr");
+  if (firstTextBlock && !normalizedBlocks.some((block) => block.type === "h1")) {
+    firstTextBlock.type = "h1";
+    firstTextBlock.highlight = false;
+    firstTextBlock.underline = false;
+  }
+
+  const structuredBlocks: ContentBlock[] = [];
+  normalizedBlocks.forEach((block) => {
+    if (block.type === "hr") {
+      addDividerIfNeeded(structuredBlocks);
+      return;
+    }
+
+    if (block.type === "h2") {
+      addDividerIfNeeded(structuredBlocks);
+    }
+
+    structuredBlocks.push(block);
+
+    if (block.type === "h1") {
+      addDividerAfterTitleIfNeeded(structuredBlocks);
+    }
+  });
+
+  return applyRuleBasedEmphasis(compactDividers(structuredBlocks));
 }
 
 export function blocksToMarkdown(blocks: ContentBlock[]): string {
@@ -268,6 +312,28 @@ function chooseBestIndex(
   return bestScore >= threshold ? bestIndex : -1;
 }
 
+function chooseBestIndexExcept(
+  sentences: string[],
+  scorer: (sentence: string, index: number, total: number) => number,
+  threshold: number,
+  excludedIndex: number,
+) {
+  let bestIndex = -1;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  sentences.forEach((sentence, index) => {
+    if (index === excludedIndex) return;
+
+    const score = scorer(sentence, index, sentences.length);
+    if (score > bestScore || (score === bestScore && index === sentences.length - 1)) {
+      bestIndex = index;
+      bestScore = score;
+    }
+  });
+
+  return bestScore >= threshold ? bestIndex : -1;
+}
+
 function scoreHighlightSentence(sentence: string, index: number, total: number) {
   let score = 0;
   const isFirstOrLast = index === 0 || index === total - 1;
@@ -308,17 +374,132 @@ function addDividerAfterTitleIfNeeded(blocks: ContentBlock[]) {
 }
 
 function compactDividers(blocks: ContentBlock[]): ContentBlock[] {
-  const compacted = blocks.filter((block, index, all) => {
+  const compacted = blocks.reduce<ContentBlock[]>((result, block) => {
+    if (block.type !== "hr") {
+      result.push(block);
+      return result;
+    }
+
+    const previous = result[result.length - 1];
+    if (previous && previous.type !== "hr") {
+      result.push(block);
+    }
+
+    return result;
+  }, []);
+
+  return compacted.filter((block, index, all) => {
     if (block.type !== "hr") return true;
-    const previous = all[index - 1];
-    const next = all[index + 1];
-    return Boolean(previous && next && previous.type !== "hr" && next.type !== "hr");
+    return index > 0 && index < all.length - 1;
+  });
+}
+
+function prepareAiDraftBlock(block: ContentBlock): ContentBlock {
+  if (block.type === "hr") {
+    return {
+      ...block,
+      text: "",
+      segments: undefined,
+      highlight: false,
+      underline: false,
+    };
+  }
+
+  return {
+    ...block,
+    segments: cleanDraftSegments(block),
+    highlight: false,
+    underline: false,
+  };
+}
+
+function cleanDraftSegments(block: ContentBlock): TextSegment[] | undefined {
+  const segments = normalizeTextSegments(block.segments);
+  if (!segments) return undefined;
+
+  let coloredSegments = 0;
+  let coloredChars = 0;
+  const cleanedSegments = segments.map((segment) => {
+    const color = shouldKeepInlineColor(segment, block, coloredSegments, coloredChars) ? segment.color : undefined;
+    if (color) {
+      coloredSegments += 1;
+      coloredChars += getComparableTextLength(segment.text);
+    }
+
+    return {
+      text: segment.text,
+      bold: segment.bold,
+      color,
+    };
   });
 
-  return compacted.filter((block, index) => {
-    if (block.type !== "hr") return true;
-    return index > 0 && index < compacted.length - 1;
+  const normalized = normalizeTextSegments(cleanedSegments);
+  if (!normalized?.some((segment) => segment.bold || segment.color)) return undefined;
+  return normalized;
+}
+
+function shouldKeepInlineColor(
+  segment: TextSegment,
+  block: ContentBlock,
+  coloredSegments: number,
+  coloredChars: number,
+) {
+  if (!segment.color || block.type !== "p") return false;
+
+  const segmentText = segment.text.trim();
+  const segmentLength = getComparableTextLength(segmentText);
+  const blockLength = getComparableTextLength(block.text);
+
+  if (segmentLength < minInlineColorLength || segmentLength > maxInlineColorLength) return false;
+  if (blockLength > 0 && segmentLength / blockLength > maxInlineColorRatio) return false;
+  if (inlineColorSentencePunctuation.test(segmentText)) return false;
+  if (coloredSegments >= maxInlineColorSegmentsPerBlock) return false;
+  if (coloredChars + segmentLength > maxInlineColorCharsPerBlock) return false;
+
+  return inlineColorMeaningPatterns[segment.color].test(segmentText);
+}
+
+function getComparableTextLength(text: string) {
+  return Array.from(text.replace(/\s/g, "")).length;
+}
+
+function applyRuleBasedEmphasis(blocks: ContentBlock[]): ContentBlock[] {
+  const emphasizedBlocks = blocks.map((block) => ({
+    ...block,
+    highlight: false,
+    underline: false,
+  }));
+  let paragraphIndexes: number[] = [];
+
+  const flushParagraphGroup = () => {
+    if (!paragraphIndexes.length) return;
+
+    const sentences = paragraphIndexes.map((blockIndex) => emphasizedBlocks[blockIndex].text);
+    const underlineIndex = chooseBestIndex(sentences, scoreUnderlineSentence, 4);
+    const highlightIndex = chooseBestIndexExcept(sentences, scoreHighlightSentence, 3, underlineIndex);
+
+    if (underlineIndex >= 0) {
+      emphasizedBlocks[paragraphIndexes[underlineIndex]].underline = true;
+    }
+
+    if (highlightIndex >= 0) {
+      emphasizedBlocks[paragraphIndexes[highlightIndex]].highlight = true;
+    }
+
+    paragraphIndexes = [];
+  };
+
+  emphasizedBlocks.forEach((block, index) => {
+    if (block.type === "p") {
+      paragraphIndexes.push(index);
+      return;
+    }
+
+    flushParagraphGroup();
   });
+  flushParagraphGroup();
+
+  return emphasizedBlocks;
 }
 
 function escapeInlineMarkdown(text: string): string {
