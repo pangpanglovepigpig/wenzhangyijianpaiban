@@ -1,4 +1,4 @@
-const CACHE_NAME = "xiaohongshu-article-notes-v4";
+const CACHE_NAME = "xiaohongshu-article-notes-v6";
 const APP_SCOPE = new URL(self.registration.scope);
 const CORE_ASSETS = ["", "index.html", "manifest.webmanifest", "icons/app-icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"].map(
   (path) => new URL(path, APP_SCOPE).toString(),

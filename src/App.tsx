@@ -1,25 +1,31 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  ChevronLeft,
   Download,
   FileImage,
   Heading1,
+  Heading2,
   Heading3,
   Highlighter,
   ImageDown,
   Minus,
-  MoreHorizontal,
   Plus,
   RefreshCcw,
   Rows3,
   Trash2,
   Underline,
-  Upload,
 } from "lucide-react";
-import { exportPagesToPng, type ExportedImage } from "./exportImage";
+import { exportPagesToPng, measureBlocksForPng, type ExportedImage } from "./exportImage";
+import { generateDraftWithDeepSeek } from "./draftApi";
 import { blocksToMarkdown, createBlocksFromText, IMAGE_CONFIG, makeBlock, sampleArticle } from "./formatter";
-import { paginateBlocks, PAGE_HEIGHT, PAGE_WIDTH } from "./pagination";
-import type { ContentBlock, PageModel } from "./types";
+import { paginateBlocks } from "./pagination";
+import {
+  DEFAULT_CARD_STYLE,
+  FONT_OPTIONS,
+  THEME_OPTIONS,
+  resolveCardStyle,
+  type ResolvedCardStyle,
+} from "./cardStyle";
+import type { CardStyleSettings, ContentBlock, FontFamilyId, PageModel } from "./types";
 
 export function App() {
   const [sourceText, setSourceText] = useState(sampleArticle);
@@ -27,37 +33,99 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pages, setPages] = useState<PageModel[]>([]);
   const [images, setImages] = useState<ExportedImage[]>([]);
-  const measureRef = useRef<HTMLDivElement | null>(null);
+  const [isPreviewRendering, setIsPreviewRendering] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [isDraftGenerating, setIsDraftGenerating] = useState(false);
+  const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
+  const [styleSettings, setStyleSettings] = useState<CardStyleSettings>(DEFAULT_CARD_STYLE);
+  const previewRequestRef = useRef(0);
+  const draftRequestRef = useRef(0);
 
   const markdown = useMemo(() => blocksToMarkdown(blocks), [blocks]);
-  const renderConfig = useMemo(() => ({ ...IMAGE_CONFIG, markdown }), [markdown]);
+  const cardStyle = useMemo(() => resolveCardStyle(styleSettings), [styleSettings]);
+  const renderConfig = useMemo(
+    () => ({ ...IMAGE_CONFIG, markdown, theme: cardStyle.theme.id, width: cardStyle.width, height: cardStyle.height }),
+    [cardStyle.height, cardStyle.theme.id, cardStyle.width, markdown],
+  );
   const selectedBlock = blocks.find((block) => block.id === selectedId) ?? null;
   const canShareImages = images.length > 0 && canShareFiles(images);
 
   useEffect(() => {
     return () => {
-      images.forEach((image) => URL.revokeObjectURL(image.url));
+      revokeImages(images);
     };
   }, [images]);
 
+  useEffect(() => {
+    if (!pages.length) {
+      setImages([]);
+      setIsPreviewRendering(false);
+      return;
+    }
+
+    let isCancelled = false;
+    const requestId = previewRequestRef.current + 1;
+    previewRequestRef.current = requestId;
+    setIsPreviewRendering(true);
+    setPreviewError(null);
+
+    const timeout = window.setTimeout(() => {
+      exportPagesToPng(pages, cardStyle)
+        .then((nextImages) => {
+          if (isCancelled || previewRequestRef.current !== requestId) {
+            revokeImages(nextImages);
+            return;
+          }
+
+          setImages(nextImages);
+          setIsPreviewRendering(false);
+        })
+        .catch(() => {
+          if (isCancelled || previewRequestRef.current !== requestId) return;
+
+          setPreviewError("预览生成失败，请再刷新一次。");
+          setImages([]);
+          setIsPreviewRendering(false);
+        });
+    }, 80);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [cardStyle, pages, previewRefreshNonce]);
+
   useLayoutEffect(() => {
     const frame = requestAnimationFrame(() => {
-      const nextHeights = new Map<string, number>();
-      const nodes = measureRef.current?.querySelectorAll<HTMLElement>("[data-measure-id]");
-      nodes?.forEach((node) => {
-        nextHeights.set(node.dataset.measureId ?? "", Math.ceil(node.getBoundingClientRect().height) + 6);
-      });
-      setPages(paginateBlocks(blocks, nextHeights));
+      const nextHeights = measureBlocksForPng(blocks, cardStyle);
+      setPages(paginateBlocks(blocks, nextHeights, cardStyle));
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [blocks]);
+  }, [blocks, cardStyle]);
 
-  function generateDraft() {
-    const nextBlocks = createBlocksFromText(sourceText);
-    setBlocks(nextBlocks);
-    setSelectedId(nextBlocks[0]?.id ?? null);
-    clearImages();
+  async function generateDraft() {
+    const requestId = draftRequestRef.current + 1;
+    draftRequestRef.current = requestId;
+    setIsDraftGenerating(true);
+    setDraftError(null);
+
+    try {
+      const nextBlocks = await generateDraftWithDeepSeek(sourceText);
+      if (draftRequestRef.current !== requestId) return;
+
+      setBlocks(nextBlocks);
+      setSelectedId(nextBlocks[0]?.id ?? null);
+      clearImages();
+    } catch (error) {
+      if (draftRequestRef.current !== requestId) return;
+      setDraftError(error instanceof Error ? error.message : "DeepSeek 生成失败，请稍后再试。");
+    } finally {
+      if (draftRequestRef.current === requestId) {
+        setIsDraftGenerating(false);
+      }
+    }
   }
 
   function updateBlock(id: string, patch: Partial<ContentBlock>) {
@@ -118,19 +186,19 @@ export function App() {
     clearImages();
   }
 
-  async function exportImages() {
-    const nextImages = await exportPagesToPng(pages);
-    setImages((current) => {
-      current.forEach((image) => URL.revokeObjectURL(image.url));
-      return nextImages;
-    });
+  function updateStyleSettings(patch: Partial<CardStyleSettings>) {
+    setStyleSettings((current) => ({ ...current, ...patch }));
+    clearImages();
+  }
+
+  function exportImages() {
+    setPreviewRefreshNonce((current) => current + 1);
   }
 
   function clearImages() {
-    setImages((current) => {
-      current.forEach((image) => URL.revokeObjectURL(image.url));
-      return [];
-    });
+    previewRequestRef.current += 1;
+    setPreviewError(null);
+    setImages([]);
   }
 
   async function saveAllImages() {
@@ -157,23 +225,33 @@ export function App() {
               <p className="eyebrow">Article</p>
               <h1>小红书图文排版</h1>
             </div>
-            <button className="primary-button" onClick={generateDraft}>
+            <button className="primary-button" onClick={generateDraft} disabled={isDraftGenerating}>
               <RefreshCcw size={18} />
-              生成初稿
+              {isDraftGenerating ? "AI生成中" : "生成初稿"}
             </button>
           </div>
 
           <textarea
             className="source-input"
             value={sourceText}
-            onChange={(event) => setSourceText(event.target.value)}
+            onChange={(event) => {
+              setSourceText(event.target.value);
+              setDraftError(null);
+            }}
             aria-label="文章正文"
           />
 
+          {draftError && <div className="draft-error">{draftError}</div>}
+
+          <StyleSettingsPanel settings={styleSettings} cardStyle={cardStyle} onChange={updateStyleSettings} />
+
           <div className="config-strip">
-            <span>{renderConfig.theme}</span>
-            <span>{renderConfig.width}px</span>
-            <span>{renderConfig.height}px</span>
+            <span>{cardStyle.theme.label}</span>
+            <span>{cardStyle.font.label}</span>
+            <span>{cardStyle.settings.baseFontSize}px</span>
+            <span>
+              {renderConfig.width}×{renderConfig.height}
+            </span>
             <span>{renderConfig.splitMode}</span>
           </div>
         </aside>
@@ -192,6 +270,14 @@ export function App() {
                 title="标题一"
               >
                 <Heading1 size={18} />
+              </button>
+              <button
+                className={selectedBlock?.type === "h2" ? "tool active" : "tool"}
+                onClick={() => toggleType("h2")}
+                disabled={!selectedBlock || selectedBlock.type === "hr"}
+                title="标题二"
+              >
+                <Heading2 size={18} />
               </button>
               <button
                 className={selectedBlock?.type === "h3" ? "tool active" : "tool"}
@@ -229,6 +315,7 @@ export function App() {
               >
                 <div className="block-label">
                   {block.type === "h1" && <Heading1 size={16} />}
+                  {block.type === "h2" && <Heading2 size={16} />}
                   {block.type === "h3" && <Heading3 size={16} />}
                   {block.type === "p" && <Rows3 size={16} />}
                   {block.type === "hr" && <Minus size={16} />}
@@ -240,9 +327,9 @@ export function App() {
                   <textarea
                     className="block-text"
                     value={block.text}
-                    onChange={(event) => updateBlock(block.id, { text: event.target.value })}
+                    onChange={(event) => updateBlock(block.id, { text: event.target.value, segments: undefined })}
                     onFocus={() => setSelectedId(block.id)}
-                    rows={block.type === "h1" ? 2 : 3}
+                    rows={block.type === "h1" || block.type === "h2" ? 2 : 3}
                     aria-label="排版块文本"
                   />
                 )}
@@ -277,43 +364,116 @@ export function App() {
             <div className="export-actions">
               <button className="primary-button" onClick={exportImages}>
                 <FileImage size={18} />
-                生成图片
+                {isPreviewRendering ? "生成中" : "刷新预览"}
               </button>
-              <button className="secondary-button" onClick={saveAllImages} disabled={!images.length}>
+              <button className="secondary-button" onClick={saveAllImages} disabled={!images.length || isPreviewRendering}>
                 <ImageDown size={18} />
                 {canShareImages ? "保存全部" : "下载全部"}
               </button>
             </div>
           </div>
 
-          <div className="page-grid">
-            {pages.map((page, index) => (
-              <div className="page-frame" key={page.id}>
-                <NotePage blocks={page.blocks} />
-                <span className="page-index">{index + 1}</span>
-              </div>
-            ))}
-          </div>
+          <div className="preview-scroll" aria-busy={isPreviewRendering}>
+            {previewError && <div className="preview-state error">{previewError}</div>}
 
-          {images.length > 0 && (
-            <div className="image-results">
-              {images.map((image) => (
-                <button key={image.id} className="download-link" onClick={() => saveImage(image)}>
-                  <Download size={16} />
-                  {canShareImages ? `保存 ${image.name}` : image.name}
-                </button>
-              ))}
-            </div>
-          )}
+            {images.length > 0 ? (
+              images.map((image, index) => (
+                <article className="preview-image-frame" key={image.id}>
+                  <img
+                    className="preview-image"
+                    src={image.url}
+                    width={cardStyle.width}
+                    height={cardStyle.height}
+                    alt={image.name}
+                  />
+                  <div className="preview-image-toolbar">
+                    <span className="preview-image-number">{index + 1}</span>
+                    <button className="download-link" onClick={() => saveImage(image)}>
+                      <Download size={16} />
+                      {canShareImages ? "保存" : "下载"}
+                    </button>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="preview-state">{isPreviewRendering ? "正在生成预览..." : "暂无预览"}</div>
+            )}
+          </div>
         </section>
       </section>
 
-      <div className="measure-stage" aria-hidden="true" ref={measureRef}>
-        {blocks.map((block) => (
-          <MeasuredBlock key={block.id} block={block} />
-        ))}
-      </div>
     </main>
+  );
+}
+
+function revokeImages(images: ExportedImage[]) {
+  images.forEach((image) => URL.revokeObjectURL(image.url));
+}
+
+function StyleSettingsPanel({
+  settings,
+  cardStyle,
+  onChange,
+}: {
+  settings: CardStyleSettings;
+  cardStyle: ResolvedCardStyle;
+  onChange: (patch: Partial<CardStyleSettings>) => void;
+}) {
+  return (
+    <section className="style-settings" aria-label="样式设置">
+      <div className="style-setting-row">
+        <span className="setting-label">主题</span>
+        <div className="theme-segment" role="group" aria-label="主题">
+          {THEME_OPTIONS.map((theme) => (
+            <button
+              key={theme.id}
+              type="button"
+              className={settings.themeId === theme.id ? "theme-choice active" : "theme-choice"}
+              onClick={() => onChange({ themeId: theme.id })}
+            >
+              <span className="theme-swatches" aria-hidden="true">
+                {theme.swatches.map((color) => (
+                  <span key={color} style={{ backgroundColor: color }} />
+                ))}
+              </span>
+              <span>{theme.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="style-setting-grid">
+        <label className="field-control">
+          <span className="setting-label">字体</span>
+          <select
+            value={settings.fontFamilyId}
+            onChange={(event) => onChange({ fontFamilyId: event.target.value as FontFamilyId })}
+            aria-label="字体"
+          >
+            {FONT_OPTIONS.map((font) => (
+              <option key={font.id} value={font.id}>
+                {font.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field-control">
+          <span className="setting-label">
+            字号 <strong>{cardStyle.settings.baseFontSize}px</strong>
+          </span>
+          <input
+            type="range"
+            min="14"
+            max="20"
+            step="0.5"
+            value={settings.baseFontSize}
+            onChange={(event) => onChange({ baseFontSize: Number(event.target.value) })}
+            aria-label="字号"
+          />
+        </label>
+      </div>
+    </section>
   );
 }
 
@@ -345,50 +505,4 @@ function downloadImage(image: ExportedImage) {
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
-}
-
-function NotePage({ blocks }: { blocks: ContentBlock[] }) {
-  return (
-    <div className="note-page" style={{ width: PAGE_WIDTH, height: PAGE_HEIGHT }}>
-      <div className="apple-note-chrome" aria-hidden="true">
-        <div className="apple-note-back">
-          <ChevronLeft size={25} strokeWidth={2.6} />
-          <span>备忘录</span>
-        </div>
-        <div className="apple-note-actions">
-          <Upload size={22} strokeWidth={2.3} />
-          <span className="apple-note-more">
-            <MoreHorizontal size={18} strokeWidth={2.6} />
-          </span>
-        </div>
-      </div>
-      {blocks.map((block) => (
-        <NoteBlock block={block} key={block.id} />
-      ))}
-    </div>
-  );
-}
-
-function MeasuredBlock({ block }: { block: ContentBlock }) {
-  return (
-    <div className="note-page measure-page">
-      <div data-measure-id={block.id}>
-        <NoteBlock block={block} />
-      </div>
-    </div>
-  );
-}
-
-function NoteBlock({ block }: { block: ContentBlock }) {
-  if (block.type === "hr") return <hr className="note-divider" />;
-  if (block.type === "h1") return <h1 className="note-title">{block.text}</h1>;
-  if (block.type === "h3") return <h3 className="note-subtitle">{block.text}</h3>;
-
-  return (
-    <p className="note-paragraph">
-      <span className={block.highlight ? "text-highlight" : undefined}>
-        <span className={block.underline ? "text-underline" : undefined}>{block.text}</span>
-      </span>
-    </p>
-  );
 }

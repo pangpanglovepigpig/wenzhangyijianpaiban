@@ -1,10 +1,14 @@
 import type { ContentBlock, PageModel } from "./types";
+import { CARD_HEIGHT, CARD_WIDTH, type ResolvedCardStyle } from "./cardStyle";
 
-export const PAGE_WIDTH = 440;
-export const PAGE_HEIGHT = 586;
-export const PAGE_CONTENT_HEIGHT = 476;
+export const PAGE_WIDTH = CARD_WIDTH;
+export const PAGE_HEIGHT = CARD_HEIGHT;
 
-export function paginateBlocks(blocks: ContentBlock[], measuredHeights: Map<string, number>): PageModel[] {
+export function paginateBlocks(
+  blocks: ContentBlock[],
+  measuredHeights: Map<string, number>,
+  cardStyle: ResolvedCardStyle,
+): PageModel[] {
   const pages: PageModel[] = [];
   let current: ContentBlock[] = [];
   let used = 0;
@@ -13,7 +17,7 @@ export function paginateBlocks(blocks: ContentBlock[], measuredHeights: Map<stri
     const height = measuredHeights.get(block.id) ?? fallbackHeight(block);
     const startsPage = current.length === 0;
 
-    if (!startsPage && used + height > PAGE_CONTENT_HEIGHT) {
+    if (!startsPage && used + height > cardStyle.contentHeight) {
       const trailingDivider = current[current.length - 1]?.type === "hr" ? current[current.length - 1] : null;
       const previousBlocks = trailingDivider ? current.slice(0, -1) : current;
       if (previousBlocks.length > 0) {
@@ -46,6 +50,7 @@ function trimTrailingDivider(blocks: ContentBlock[]) {
 function fallbackHeight(block: ContentBlock) {
   if (block.type === "hr") return 29;
   if (block.type === "h1") return 47;
+  if (block.type === "h2") return 43;
   if (block.type === "h3") return 35;
   return 39;
 }

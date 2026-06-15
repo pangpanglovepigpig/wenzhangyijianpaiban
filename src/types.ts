@@ -1,17 +1,41 @@
-export type BlockType = "h1" | "h3" | "p" | "hr";
+export type BlockType = "h1" | "h2" | "h3" | "p" | "hr";
+export type ThemeId = "apple-notes" | "bytedance" | "alibaba";
+export type FontFamilyId = "system" | "hei" | "song" | "kai";
+export type InlineColor = "red" | "blue";
+
+export interface CardStyleSettings {
+  themeId: ThemeId;
+  fontFamilyId: FontFamilyId;
+  baseFontSize: number;
+}
 
 export interface ContentBlock {
   id: string;
   type: BlockType;
   text: string;
+  segments?: TextSegment[];
   highlight: boolean;
   underline: boolean;
+}
+
+export interface TextSegment {
+  text: string;
+  bold?: boolean;
+  color?: InlineColor;
+}
+
+export interface DraftBlock {
+  type: BlockType;
+  text: string;
+  segments?: TextSegment[];
+  highlight?: boolean;
+  underline?: boolean;
 }
 
 export interface RenderConfig {
   markdown: string;
   themeMode: string;
-  theme: "apple-notes";
+  theme: ThemeId;
   overHiddenMode: boolean;
   mdxMode: boolean;
   width: number;

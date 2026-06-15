@@ -1,4 +1,5 @@
-import type { ContentBlock, RenderConfig } from "./types";
+import type { ContentBlock, InlineColor, RenderConfig, TextSegment } from "./types";
+import { CARD_HEIGHT, CARD_WIDTH } from "./cardStyle";
 
 export const IMAGE_CONFIG: RenderConfig = {
   markdown: "",
@@ -6,8 +7,8 @@ export const IMAGE_CONFIG: RenderConfig = {
   theme: "apple-notes",
   overHiddenMode: false,
   mdxMode: true,
-  width: 880,
-  height: 1172,
+  width: CARD_WIDTH,
+  height: CARD_HEIGHT,
   splitMode: "autoSplit",
   background: "",
   shadowUrl: "",
@@ -26,6 +27,10 @@ const summaryPattern =
 const markdownDividerPattern = /^-{3,}$/;
 const redUnderlineStyle =
   "text-decoration-line: underline; text-decoration-style: wavy; text-decoration-color: #d93025; text-decoration-thickness: 1.5px; text-underline-offset: 4px;";
+const inlineColorStyles: Record<InlineColor, string> = {
+  red: "color: #d93025;",
+  blue: "color: #1677ff;",
+};
 
 type TextLine = {
   text: string;
@@ -66,6 +71,20 @@ export function createBlocksFromText(input: string): ContentBlock[] {
       return;
     }
 
+    const markdownHeading = getMarkdownHeading(line.text);
+    if (markdownHeading) {
+      if (markdownHeading.level === 1) {
+        blocks.push(makeBlock(hasTitle ? "h2" : "h1", markdownHeading.text));
+        hasTitle = true;
+        return;
+      }
+
+      addDividerAfterTitleIfNeeded(blocks);
+      blocks.push(makeBlock(markdownHeading.level === 2 ? "h2" : "h3", markdownHeading.text));
+      if (markdownHeading.level === 2) bodyGroupCount += 1;
+      return;
+    }
+
     const isTitle = !hasTitle && (index === 0 || isTitleLike(line.text));
     const isHeading = !isTitle && isSubheadingLike(line);
 
@@ -79,7 +98,7 @@ export function createBlocksFromText(input: string): ContentBlock[] {
 
     if (isHeading) {
       addDividerIfNeeded(blocks);
-      blocks.push(makeBlock("h3", cleanPrefix(line.text)));
+      blocks.push(makeBlock("h2", cleanPrefix(line.text)));
       bodyGroupCount += 1;
       return;
     }
@@ -119,12 +138,13 @@ export function blocksToMarkdown(blocks: ContentBlock[]): string {
     .map((block) => {
       if (block.type === "hr") return "---";
 
-      let text = escapeInlineMarkdown(block.text);
+      let text = renderInlineMarkdown(block);
       if (block.highlight) text = `<mark>${text}</mark>`;
       if (block.underline) {
         text = `<span style="${redUnderlineStyle}">${text}</span>`;
       }
       if (block.type === "h1") return `# ${text}`;
+      if (block.type === "h2") return `## ${text}`;
       if (block.type === "h3") return `### ${text}`;
       return text;
     })
@@ -136,14 +156,43 @@ export function makeBlock(
   text = "",
   highlight = false,
   underline = false,
+  segments?: TextSegment[],
 ): ContentBlock {
+  const normalizedSegments = normalizeTextSegments(segments);
+  const normalizedText = normalizedSegments ? textFromSegments(normalizedSegments) : text;
+
   return {
     id: crypto.randomUUID(),
     type,
-    text,
+    text: normalizedText,
+    segments: normalizedSegments,
     highlight: type === "p" ? highlight : false,
     underline: type === "p" ? underline : false,
   };
+}
+
+export function makeBlockFromDraft(block: Omit<ContentBlock, "id">): ContentBlock {
+  return makeBlock(block.type, block.text, block.highlight, block.underline, block.segments);
+}
+
+export function normalizeTextSegments(segments?: TextSegment[]): TextSegment[] | undefined {
+  if (!segments?.length) return undefined;
+
+  const normalized = segments
+    .map((segment) => ({
+      text: segment.text,
+      bold: segment.bold || undefined,
+      color: segment.color === "red" || segment.color === "blue" ? segment.color : undefined,
+    }))
+    .filter((segment) => segment.text.length > 0);
+
+  if (!normalized.length) return undefined;
+
+  return mergeAdjacentSegments(normalized);
+}
+
+export function textFromSegments(segments: TextSegment[]) {
+  return segments.map((segment) => segment.text).join("");
 }
 
 function isTitleLike(line: string): boolean {
@@ -176,7 +225,16 @@ function isSubheadingLike(line: TextLine): boolean {
 }
 
 function cleanPrefix(line: string): string {
-  return line.replace(/^[-*]\s+/, "").trim();
+  return line.replace(/^#{1,3}\s+/, "").replace(/^[-*]\s+/, "").trim();
+}
+
+function getMarkdownHeading(line: string) {
+  const match = /^(#{1,3})\s+(.+)$/.exec(line);
+  if (!match) return null;
+  return {
+    level: match[1].length as 1 | 2 | 3,
+    text: match[2].trim(),
+  };
 }
 
 function splitSentences(line: string): string[] {
@@ -265,4 +323,31 @@ function compactDividers(blocks: ContentBlock[]): ContentBlock[] {
 
 function escapeInlineMarkdown(text: string): string {
   return text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderInlineMarkdown(block: ContentBlock) {
+  const segments = normalizeTextSegments(block.segments);
+  if (!segments) return escapeInlineMarkdown(block.text);
+
+  return segments.map(renderSegmentMarkdown).join("");
+}
+
+function renderSegmentMarkdown(segment: TextSegment) {
+  let text = escapeInlineMarkdown(segment.text);
+  if (segment.bold) text = `**${text}**`;
+  if (segment.color) text = `<span style="${inlineColorStyles[segment.color]}">${text}</span>`;
+  return text;
+}
+
+function mergeAdjacentSegments(segments: TextSegment[]) {
+  return segments.reduce<TextSegment[]>((result, segment) => {
+    const previous = result[result.length - 1];
+    if (previous && previous.bold === segment.bold && previous.color === segment.color) {
+      previous.text += segment.text;
+      return result;
+    }
+
+    result.push({ ...segment });
+    return result;
+  }, []);
 }
