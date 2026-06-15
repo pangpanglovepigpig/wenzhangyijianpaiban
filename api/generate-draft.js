@@ -2,9 +2,11 @@ const DEEPSEEK_ENDPOINT = "https://api.deepseek.com/chat/completions";
 const DEFAULT_MODEL = "deepseek-v4-flash";
 const MAX_INPUT_LENGTH = 12000;
 const MAX_BLOCKS = 120;
-const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 55000;
 const MAX_REQUEST_TIMEOUT_MS = 55000;
-const FALLBACK_NOTICE = "DeepSeek 暂时响应较慢，已先用本地规则生成可编辑初稿。";
+const LOCAL_FALLBACK_NOTICE = "DeepSeek 暂时响应较慢，已先用本地规则生成可编辑初稿。";
+const SLOW_RESPONSE_ERROR =
+  "DeepSeek 当前响应较慢或繁忙，这次没有生成初稿。请稍后重试，或确认线上 DEEPSEEK_TIMEOUT_MS 已设为 55000 后重新部署。";
 const VALID_BLOCK_TYPES = new Set(["h1", "h2", "h3", "p", "hr"]);
 const VALID_COLORS = new Set(["red", "blue"]);
 const FALLBACKABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
@@ -48,10 +50,10 @@ export default async function handler(req, res) {
     try {
       rawDraft = await requestDeepSeekDraft(text, apiKey);
     } catch (error) {
-      if (!isFallbackableDeepSeekError(error)) throw error;
+      if (!isFallbackableDeepSeekError(error) || !isLocalFallbackEnabled()) throw error;
 
       rawDraft = createFallbackDraft(text);
-      notice = FALLBACK_NOTICE;
+      notice = LOCAL_FALLBACK_NOTICE;
     }
 
     const blocks = sanitizeDraft(rawDraft);
@@ -118,27 +120,38 @@ async function requestDeepSeekDraft(text, apiKey) {
 
     const responseText = await response.text();
     if (!response.ok) {
+      if (response.status === 429) {
+        throw new DeepSeekRequestError(
+          "DeepSeek 当前请求过于频繁或额度受限，这次没有生成初稿。请稍后重试，或检查 DeepSeek 账户额度。",
+          true,
+        );
+      }
+
+      if (FALLBACKABLE_STATUSES.has(response.status)) {
+        throw new DeepSeekRequestError(SLOW_RESPONSE_ERROR, true);
+      }
+
       throw new DeepSeekRequestError(
         `DeepSeek 请求失败：${response.status} ${responseText.slice(0, 180)}`,
-        FALLBACKABLE_STATUSES.has(response.status),
+        false,
       );
     }
 
     const data = safeParseJson(responseText);
     const content = data?.choices?.[0]?.message?.content;
     if (typeof content !== "string" || !content.trim()) {
-      throw new DeepSeekRequestError("DeepSeek 返回内容为空。", true);
+      throw new DeepSeekRequestError("DeepSeek 返回内容为空，这次没有生成初稿。请再试一次。", true);
     }
 
     const draft = safeParseJson(content);
     if (!draft) {
-      throw new DeepSeekRequestError("DeepSeek 返回格式异常。", true);
+      throw new DeepSeekRequestError("DeepSeek 返回格式异常，这次没有生成初稿。请再试一次。", true);
     }
 
     return draft;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new DeepSeekRequestError("DeepSeek 响应超时，请稍后再试。", true);
+      throw new DeepSeekRequestError(SLOW_RESPONSE_ERROR, true);
     }
     throw error;
   } finally {
@@ -156,6 +169,10 @@ class DeepSeekRequestError extends Error {
 
 function isFallbackableDeepSeekError(error) {
   return error instanceof DeepSeekRequestError && error.fallbackable === true;
+}
+
+function isLocalFallbackEnabled() {
+  return String(process.env.DEEPSEEK_ENABLE_LOCAL_FALLBACK || "").toLowerCase() === "true";
 }
 
 function getRequestTimeoutMs() {
