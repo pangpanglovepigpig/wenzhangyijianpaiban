@@ -28,11 +28,14 @@ const inlineBlueActionPattern =
   /^(先|再|然后|最后|把|用|让|给|从|只要|可以|建议|总的来说|总之|所以|因此|一句话|简单说|也就是说)|就能|即可|适合用|拆成|解决/;
 const summaryPattern =
   /(^所以|^因此|^总之|^一句话|^最后|^简单说|^也就是说|才是|就能|即可|更重要|更适合|更容易|更值得|更清楚|更稳定|更有效)/;
-const infoBlockMinLength = 40;
-const infoBlockTargetMaxLength = 110;
-const infoBlockForcedMaxLength = 130;
-const infoBlockMaxUnits = 3;
-const longSentenceSplitLength = 110;
+const infoBlockMinLength = 24;
+const infoBlockTargetMaxLength = 68;
+const infoBlockForcedMaxLength = 86;
+const infoBlockMaxUnits = 2;
+const longSentenceSplitLength = 78;
+const orphanInfoBlockMaxLength = 6;
+const implicitSectionMinParagraphs = 3;
+const implicitSectionMinChars = 150;
 const maxInlineColorLength = 60;
 const minInlineColorLength = 6;
 const inlineColorScoreThreshold = 5;
@@ -126,7 +129,10 @@ async function requestDeepSeekDraft(text, apiKey) {
               "highlight 和 underline 必须始终返回 false；黄色高亮和红色波浪线由本地排版规则统一处理。",
               "第一行默认用 h1。",
               "h3 只能用于原文中完整存在的结构句或短段，例如“第一个层次，是因为……。”；不确定就用 p。",
-              "普通正文按信息块输出：每个 p 围绕一个完整意思，通常 1 到 3 句，约 40 到 110 字；短句要合并，超长句可以按逗号、冒号、顿号等软切分。",
+              "普通正文按更细的信息块输出：同一部分可以有多个 p 段落，每个 p 通常 1 到 2 句，约 24 到 68 字；重要提醒句、方法句、结论句可以单独成段。",
+              "不同部分之间必须用 hr 分隔；hr 只表示部分边界，不要放在同一部分的每个 p 段落之间。",
+              "没有原文小标题时，也要按内容推进自然分成几个部分，每个部分可以包含多个 p 段落。",
+              "短到无法独立阅读的句子可以合并，超长句可以按逗号、冒号、顿号等软切分。",
               "加粗用于核心结论、关键名词、重要数字、强观点，但必须来自原文原字。",
               "红色用于一句提醒、风险、不要做、必须注意、常见错误等句段，不要执着固定关键词。",
               "蓝色用于一句方法、结论、收益、行动建议、总结性判断等句段，不要执着固定关键词。",
@@ -431,49 +437,97 @@ function getSourceLines(text) {
     .filter(Boolean);
 }
 
+function getSourceTextLines(text) {
+  const rawLines = text.replace(/\r\n/g, "\n").split("\n").map((line) => line.trim());
+
+  return rawLines.reduce((result, line, index) => {
+    if (!line) return result;
+
+    result.push({
+      text: line,
+      hasBlankBefore: index === 0 || rawLines[index - 1] === "",
+    });
+
+    return result;
+  }, []);
+}
+
 function createSourcePreservingDraft(text) {
-  const lines = getSourceLines(text);
+  const lines = getSourceTextLines(text);
 
   const blocks = [];
   let hasTitle = false;
+  let sectionParagraphCount = 0;
+  let sectionTextLength = 0;
+  const hasExplicitSections = lines.some((line, index) => {
+    if (index === 0 || markdownDividerPattern.test(line.text)) return false;
+    const markdownHeading = getFallbackMarkdownHeading(line.text);
+    return Boolean((markdownHeading && markdownHeading.level > 1) || isFallbackHeading(line.text, index));
+  });
+
+  const resetSectionStats = () => {
+    sectionParagraphCount = 0;
+    sectionTextLength = 0;
+  };
 
   lines.forEach((line, index) => {
     if (blocks.length >= MAX_BLOCKS) return;
 
-    if (markdownDividerPattern.test(line)) {
+    if (markdownDividerPattern.test(line.text)) {
       addFallbackDivider(blocks);
+      resetSectionStats();
       return;
     }
 
     if (!hasTitle) {
-      blocks.push(createFallbackBlock("h1", line));
+      blocks.push(createFallbackBlock("h1", line.text));
       hasTitle = true;
       addFallbackDivider(blocks);
+      resetSectionStats();
       return;
     }
 
-    const markdownHeading = getFallbackMarkdownHeading(line);
+    const markdownHeading = getFallbackMarkdownHeading(line.text);
     if (markdownHeading) {
       addFallbackDivider(blocks);
-      blocks.push(createFallbackBlock(markdownHeading.level === 2 ? "h2" : "h3", line));
+      blocks.push(createFallbackBlock(markdownHeading.level === 2 ? "h2" : "h3", line.text));
+      resetSectionStats();
       return;
     }
 
-    if (isFallbackHeading(line, index)) {
+    if (isFallbackHeading(line.text, index)) {
       addFallbackDivider(blocks);
-      blocks.push(createFallbackBlock("h3", line));
+      blocks.push(createFallbackBlock("h3", line.text));
+      resetSectionStats();
       return;
     }
 
-    splitIntoInfoBlocks(line).forEach((sentence) => {
+    splitIntoInfoBlocks(line.text).forEach((sentence, paragraphIndex) => {
       if (blocks.length < MAX_BLOCKS) {
         if (isSourceH3Candidate(sentence)) {
           addFallbackDivider(blocks);
           blocks.push(createFallbackBlock("h3", sentence));
+          resetSectionStats();
           return;
         }
 
+        if (
+          shouldStartImplicitSection(
+            blocks,
+            hasExplicitSections,
+            line,
+            paragraphIndex,
+            sectionParagraphCount,
+            sectionTextLength,
+          )
+        ) {
+          addFallbackDivider(blocks);
+          resetSectionStats();
+        }
+
         blocks.push(createFallbackBlock("p", sentence, decorateFallbackSegments(sentence)));
+        sectionParagraphCount += 1;
+        sectionTextLength += getComparableTextLength(sentence);
       }
     });
   });
@@ -513,11 +567,14 @@ function splitIntoInfoBlocks(line) {
       return;
     }
 
-    const currentLength = getComparableTextLength(line.slice(current.start, current.end));
+    const currentText = line.slice(current.start, current.end);
+    const currentLength = getComparableTextLength(currentText);
     const nextLength = getComparableTextLength(line.slice(current.start, unit.end));
     const canAddUnit = currentUnitCount < infoBlockMaxUnits;
-    const shouldMergeShortBlock = currentLength < infoBlockMinLength && nextLength <= infoBlockForcedMaxLength;
-    const fitsTargetBlock = nextLength <= infoBlockTargetMaxLength;
+    const currentCanStandAlone = isStandaloneInfoUnit(currentText);
+    const shouldMergeShortBlock =
+      currentLength < infoBlockMinLength && !currentCanStandAlone && nextLength <= infoBlockForcedMaxLength;
+    const fitsTargetBlock = !currentCanStandAlone && nextLength <= infoBlockTargetMaxLength;
 
     if (canAddUnit && (shouldMergeShortBlock || fitsTargetBlock)) {
       current.end = unit.end;
@@ -557,10 +614,20 @@ function mergeShortTrailingBlock(line, blocks) {
   const lastLength = getComparableTextLength(line.slice(last.start, last.end));
   const mergedLength = getComparableTextLength(line.slice(previous.start, last.end));
 
-  if (lastLength < infoBlockMinLength && mergedLength <= infoBlockForcedMaxLength) {
+  if (lastLength <= orphanInfoBlockMaxLength && mergedLength <= infoBlockTargetMaxLength) {
     previous.end = last.end;
     blocks.pop();
   }
+}
+
+function isStandaloneInfoUnit(text) {
+  const length = getComparableTextLength(text);
+  if (length < 12) return false;
+
+  return (
+    scoreInlineColorCandidate(text, "red") >= inlineColorScoreThreshold ||
+    scoreInlineColorCandidate(text, "blue") >= inlineColorScoreThreshold
+  );
 }
 
 function getSentenceRanges(text) {
@@ -588,6 +655,24 @@ function trimTextRange(text, start, end) {
   while (nextEnd > nextStart && /\s/.test(text[nextEnd - 1])) nextEnd -= 1;
 
   return nextStart < nextEnd ? [{ start: nextStart, end: nextEnd }] : [];
+}
+
+function shouldStartImplicitSection(
+  blocks,
+  hasExplicitSections,
+  line,
+  paragraphIndex,
+  sectionParagraphCount,
+  sectionTextLength,
+) {
+  if (hasExplicitSections) return false;
+  if (sectionParagraphCount === 0) return false;
+  if (blocks[blocks.length - 1]?.type === "hr") return false;
+
+  const isSourceParagraphBoundary = paragraphIndex === 0 && line.hasBlankBefore;
+  if (isSourceParagraphBoundary && sectionParagraphCount >= 2) return true;
+
+  return sectionParagraphCount >= implicitSectionMinParagraphs || sectionTextLength >= implicitSectionMinChars;
 }
 
 function isSourceH3Candidate(sentence) {

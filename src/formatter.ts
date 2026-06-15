@@ -20,6 +20,8 @@ const headingPattern =
 const endPunctuation = /[。！？!?；;，,、：:]$/;
 const highlightPattern =
   /(核心|关键|重点|结论|建议|原则|清单|公式|总结|一句话|真正|适合|值得|突破口|掌控感|排雷|提分|质的飞跃|前夜)/;
+const underlinePattern =
+  /(注意|提醒|不要|不能|避免|一定|必须|记得|别忘|千万|尤其|小心|风险|误区|雷区|检查|确认|遗漏|截断|错误|失败|后果|失去|降低|变差|出错|失控)/;
 const summaryPattern =
   /(^所以|^因此|^总之|^一句话|^最后|^简单说|^也就是说|才是|就能|即可|更重要|更适合|更容易|更值得|更清楚|更稳定|更有效)/;
 const markdownDividerPattern = /^-{3,}$/;
@@ -40,11 +42,14 @@ const inlineBlueActionPattern =
   /^(先|再|然后|最后|把|用|让|给|从|只要|可以|建议|总的来说|总之|所以|因此|一句话|简单说|也就是说)|就能|即可|适合用|拆成|解决/;
 const hardSentencePattern = /[^。！？!?；;]+[。！？!?；;]?/g;
 const softClausePattern = /[^，,：:、]+[，,：:、]?/g;
-const infoBlockMinLength = 40;
-const infoBlockTargetMaxLength = 110;
-const infoBlockForcedMaxLength = 130;
-const infoBlockMaxUnits = 3;
-const longSentenceSplitLength = 110;
+const infoBlockMinLength = 24;
+const infoBlockTargetMaxLength = 68;
+const infoBlockForcedMaxLength = 86;
+const infoBlockMaxUnits = 2;
+const longSentenceSplitLength = 78;
+const orphanInfoBlockMaxLength = 6;
+const implicitSectionMinParagraphs = 3;
+const implicitSectionMinChars = 150;
 const maxInlineColorLength = 60;
 const minInlineColorLength = 6;
 const maxInlineColorRatio = 0.86;
@@ -82,24 +87,40 @@ export function createBlocksFromText(input: string): ContentBlock[] {
 
   const blocks: ContentBlock[] = [];
   let hasTitle = false;
+  let sectionParagraphCount = 0;
+  let sectionTextLength = 0;
+  const hasExplicitSections = lines.some((line, index) => {
+    if (index === 0 || markdownDividerPattern.test(line.text)) return false;
+    const markdownHeading = getMarkdownHeading(line.text);
+    return Boolean((markdownHeading && markdownHeading.level > 1) || isSubheadingLike(line));
+  });
+
+  const resetSectionStats = () => {
+    sectionParagraphCount = 0;
+    sectionTextLength = 0;
+  };
 
   lines.forEach((line, index) => {
     if (markdownDividerPattern.test(line.text)) {
       addDividerIfNeeded(blocks);
+      resetSectionStats();
       return;
     }
 
     const markdownHeading = getMarkdownHeading(line.text);
     if (markdownHeading) {
       if (markdownHeading.level === 1) {
+        if (hasTitle) addDividerIfNeeded(blocks);
         blocks.push(makeBlock(hasTitle ? "h2" : "h1", markdownHeading.text));
         hasTitle = true;
+        resetSectionStats();
         return;
       }
 
       addDividerAfterTitleIfNeeded(blocks);
       addDividerIfNeeded(blocks);
       blocks.push(makeBlock(markdownHeading.level === 2 ? "h2" : "h3", markdownHeading.text));
+      resetSectionStats();
       return;
     }
 
@@ -109,6 +130,7 @@ export function createBlocksFromText(input: string): ContentBlock[] {
     if (isTitle) {
       blocks.push(makeBlock("h1", cleanPrefix(line.text)));
       hasTitle = true;
+      resetSectionStats();
       return;
     }
 
@@ -117,11 +139,28 @@ export function createBlocksFromText(input: string): ContentBlock[] {
     if (isHeading) {
       addDividerIfNeeded(blocks);
       blocks.push(makeBlock("h2", cleanPrefix(line.text)));
+      resetSectionStats();
       return;
     }
 
-    splitIntoInfoBlocks(line.text).forEach((paragraph) => {
+    splitIntoInfoBlocks(line.text).forEach((paragraph, paragraphIndex) => {
+      if (
+        shouldStartImplicitSection(
+          blocks,
+          hasExplicitSections,
+          line,
+          paragraphIndex,
+          sectionParagraphCount,
+          sectionTextLength,
+        )
+      ) {
+        addDividerIfNeeded(blocks);
+        resetSectionStats();
+      }
+
       blocks.push(makeBlock("p", paragraph, false, false, createRuleBasedSegments(paragraph, "p")));
+      sectionParagraphCount += 1;
+      sectionTextLength += getComparableTextLength(paragraph);
     });
   });
 
@@ -129,7 +168,7 @@ export function createBlocksFromText(input: string): ContentBlock[] {
     blocks[0] = { ...blocks[0], type: "h1", highlight: false, underline: false };
   }
 
-  return compactDividers(blocks);
+  return applyRuleBasedEmphasis(compactDividers(blocks));
 }
 
 export function stabilizeAiDraftBlocks(blocks: ContentBlock[]): ContentBlock[] {
@@ -151,7 +190,7 @@ export function stabilizeAiDraftBlocks(blocks: ContentBlock[]): ContentBlock[] {
       return;
     }
 
-    if (block.type === "h2") {
+    if (block.type === "h2" || block.type === "h3") {
       addDividerIfNeeded(structuredBlocks);
     }
 
@@ -289,11 +328,14 @@ function splitIntoInfoBlocks(line: string): string[] {
       return;
     }
 
-    const currentLength = getComparableTextLength(line.slice(current.start, current.end));
+    const currentText = line.slice(current.start, current.end);
+    const currentLength = getComparableTextLength(currentText);
     const nextLength = getComparableTextLength(line.slice(current.start, unit.end));
     const canAddUnit = currentUnitCount < infoBlockMaxUnits;
-    const shouldMergeShortBlock = currentLength < infoBlockMinLength && nextLength <= infoBlockForcedMaxLength;
-    const fitsTargetBlock = nextLength <= infoBlockTargetMaxLength;
+    const currentCanStandAlone = isStandaloneInfoUnit(currentText);
+    const shouldMergeShortBlock =
+      currentLength < infoBlockMinLength && !currentCanStandAlone && nextLength <= infoBlockForcedMaxLength;
+    const fitsTargetBlock = !currentCanStandAlone && nextLength <= infoBlockTargetMaxLength;
 
     if (canAddUnit && (shouldMergeShortBlock || fitsTargetBlock)) {
       current.end = unit.end;
@@ -333,10 +375,20 @@ function mergeShortTrailingBlock(line: string, blocks: TextRange[]) {
   const lastLength = getComparableTextLength(line.slice(last.start, last.end));
   const mergedLength = getComparableTextLength(line.slice(previous.start, last.end));
 
-  if (lastLength < infoBlockMinLength && mergedLength <= infoBlockForcedMaxLength) {
+  if (lastLength <= orphanInfoBlockMaxLength && mergedLength <= infoBlockTargetMaxLength) {
     previous.end = last.end;
     blocks.pop();
   }
+}
+
+function isStandaloneInfoUnit(text: string) {
+  const length = getComparableTextLength(text);
+  if (length < 12) return false;
+
+  return (
+    scoreInlineColorCandidate(text, "red") >= inlineColorScoreThreshold ||
+    scoreInlineColorCandidate(text, "blue") >= inlineColorScoreThreshold
+  );
 }
 
 function getSentenceRanges(text: string): TextRange[] {
@@ -365,6 +417,24 @@ function trimTextRange(text: string, start: number, end: number): TextRange[] {
   while (nextEnd > nextStart && /\s/.test(text[nextEnd - 1])) nextEnd -= 1;
 
   return nextStart < nextEnd ? [{ start: nextStart, end: nextEnd }] : [];
+}
+
+function shouldStartImplicitSection(
+  blocks: ContentBlock[],
+  hasExplicitSections: boolean,
+  line: TextLine,
+  paragraphIndex: number,
+  sectionParagraphCount: number,
+  sectionTextLength: number,
+) {
+  if (hasExplicitSections) return false;
+  if (sectionParagraphCount === 0) return false;
+  if (blocks[blocks.length - 1]?.type === "hr") return false;
+
+  const isSourceParagraphBoundary = paragraphIndex === 0 && line.hasBlankBefore;
+  if (isSourceParagraphBoundary && sectionParagraphCount >= 2) return true;
+
+  return sectionParagraphCount >= implicitSectionMinParagraphs || sectionTextLength >= implicitSectionMinChars;
 }
 
 function chooseBestIndexExcept(
@@ -399,6 +469,20 @@ function scoreHighlightSentence(sentence: string, index: number, total: number) 
   if (/\d+(\.\d+)?\s*(%|倍|个|条|步|天|分钟|小时|元)/.test(sentence)) score += 2;
   if (sentence.length >= 12 && sentence.length <= 70) score += 1;
   if (sentence.length < 8 || sentence.length > 96) score -= 2;
+
+  return score;
+}
+
+function scoreUnderlineSentence(sentence: string, index: number, total: number) {
+  let score = 0;
+  const isFirstOrLast = index === 0 || index === total - 1;
+
+  if (underlinePattern.test(sentence)) score += 4;
+  if (inlineRedActionPattern.test(sentence)) score += 2;
+  if (/(太多|过度|反而|否则|一旦|导致|失去|降低|变差|出错|失控)/.test(sentence)) score += 2;
+  if (isFirstOrLast && total > 1) score += 1;
+  if (sentence.length >= 8 && sentence.length <= 80) score += 1;
+  if (sentence.length < 6 || sentence.length > 120) score -= 2;
 
   return score;
 }
@@ -530,8 +614,12 @@ function applyRuleBasedEmphasis(blocks: ContentBlock[]): ContentBlock[] {
     if (!paragraphIndexes.length) return;
 
     const sentences = paragraphIndexes.map((blockIndex) => emphasizedBlocks[blockIndex].text);
-    const underlineIndex = -1;
+    const underlineIndex = chooseBestIndexExcept(sentences, scoreUnderlineSentence, 4, -1);
     const highlightIndex = chooseBestIndexExcept(sentences, scoreHighlightSentence, 3, underlineIndex);
+
+    if (underlineIndex >= 0) {
+      emphasizedBlocks[paragraphIndexes[underlineIndex]].underline = true;
+    }
 
     if (highlightIndex >= 0) {
       emphasizedBlocks[paragraphIndexes[highlightIndex]].highlight = true;
