@@ -19,9 +19,7 @@ const headingPattern =
   /^([一二三四五六七八九十]+[、.．]|第[一二三四五六七八九十\d]+[步章节]|[0-9]+[、.．]|\d+\s*[）)]|[-*]\s*)/;
 const endPunctuation = /[。！？!?；;，,、：:]$/;
 const highlightPattern =
-  /(核心|关键|重点|方法|结论|建议|原则|清单|公式|总结|一句话|真正|适合|值得|步骤|效率|复盘|定位|转化)/;
-const underlinePattern =
-  /(注意|提醒|不要|不能|避免|一定|必须|记得|别忘|千万|尤其|小心|风险|误区|雷区|检查|确认|遗漏|截断)/;
+  /(核心|关键|重点|结论|建议|原则|清单|公式|总结|一句话|真正|适合|值得|突破口|掌控感|排雷|提分|质的飞跃|前夜)/;
 const summaryPattern =
   /(^所以|^因此|^总之|^一句话|^最后|^简单说|^也就是说|才是|就能|即可|更重要|更适合|更容易|更值得|更清楚|更稳定|更有效)/;
 const markdownDividerPattern = /^-{3,}$/;
@@ -31,17 +29,28 @@ const inlineColorStyles: Record<InlineColor, string> = {
   red: "color: #d93025;",
   blue: "color: #1677ff;",
 };
-const inlineColorMeaningPatterns: Record<InlineColor, RegExp> = {
-  red: /(风险|误区|不要|不能|避免|必须|警告|后果|负面|错误|失败|问题|雷区|小心|注意|千万|别|坑|陷阱|遗漏|截断|降低|失去|减少|变差|损失|浪费|拖慢|出错|失控|焦虑|成本)/,
+const inlineColorCuePatterns: Record<InlineColor, RegExp> = {
+  red:
+    /(注意|提醒|不要|不能|避免|一定要|一定|必须|停止|正视|千万|尤其|小心|警惕|风险|误区|雷区|常见|错误|失败|后果|遗漏|截断|焦虑|粗心|瓶颈|恶性循环|自我否定|最可惜|最容易|降低|失去|变差|浪费|拖慢|出错|失控|检查|确认|排雷)/,
   blue:
-    /(方法|步骤|方案|建议|做法|行动|执行|正向|收益|可执行|提升|优化|改善|效果|效率|增长|转化|复盘|清单|路径|策略|原则|工具|流程|解决|完成|搭建|拆|先|再|适合|值得|可以|就能|即可|\d+\s*(个|条|步|点|种|类|分钟|小时|天|倍|%))/,
+    /(方法|步骤|方案|建议|做法|行动|执行|结论|总结|核心|关键|重点|原则|清单|公式|路径|策略|工具|流程|解决|完成|拆成|搭建|先把|然后|最后|所以|因此|总之|一句话|简单说|也就是说|真正|适合|值得|可以|就能|即可|提升|优化|改善|效果|效率|增长|转化|复盘|获得|抓手)/,
 };
-const inlineColorSentencePunctuation = /[。！？!?；;]/;
-const maxInlineColorLength = 14;
-const minInlineColorLength = 2;
-const maxInlineColorRatio = 0.45;
-const maxInlineColorSegmentsPerBlock = 2;
-const maxInlineColorCharsPerBlock = 22;
+const inlineRedActionPattern = /^(注意|提醒|不要|不能|避免|一定|必须|千万|小心|警惕|别|停止|检查|确认)|一定要|必须要|不要把|不能把/;
+const inlineBlueActionPattern =
+  /^(先|再|然后|最后|把|用|让|给|从|只要|可以|建议|总的来说|总之|所以|因此|一句话|简单说|也就是说)|就能|即可|适合用|拆成|解决/;
+const hardSentencePattern = /[^。！？!?；;]+[。！？!?；;]?/g;
+const softClausePattern = /[^，,：:、]+[，,：:、]?/g;
+const infoBlockMinLength = 40;
+const infoBlockTargetMaxLength = 110;
+const infoBlockForcedMaxLength = 130;
+const infoBlockMaxUnits = 3;
+const longSentenceSplitLength = 110;
+const maxInlineColorLength = 60;
+const minInlineColorLength = 6;
+const maxInlineColorRatio = 0.86;
+const maxInlineColorSegmentsPerBlock = 1;
+const maxInlineColorCharsPerBlock = 60;
+const inlineColorScoreThreshold = 5;
 
 type TextLine = {
   text: string;
@@ -73,8 +82,6 @@ export function createBlocksFromText(input: string): ContentBlock[] {
 
   const blocks: ContentBlock[] = [];
   let hasTitle = false;
-  let bodyGroupCount = 0;
-  const hasSectionHeading = lines.some((line, index) => index > 0 && isSubheadingLike(line));
 
   lines.forEach((line, index) => {
     if (markdownDividerPattern.test(line.text)) {
@@ -91,8 +98,8 @@ export function createBlocksFromText(input: string): ContentBlock[] {
       }
 
       addDividerAfterTitleIfNeeded(blocks);
+      addDividerIfNeeded(blocks);
       blocks.push(makeBlock(markdownHeading.level === 2 ? "h2" : "h3", markdownHeading.text));
-      if (markdownHeading.level === 2) bodyGroupCount += 1;
       return;
     }
 
@@ -110,30 +117,11 @@ export function createBlocksFromText(input: string): ContentBlock[] {
     if (isHeading) {
       addDividerIfNeeded(blocks);
       blocks.push(makeBlock("h2", cleanPrefix(line.text)));
-      bodyGroupCount += 1;
       return;
     }
 
-    if (!hasSectionHeading && line.nonEmptyIndex > 1) {
-      if (bodyGroupCount > 0) {
-        addDividerIfNeeded(blocks);
-      }
-      bodyGroupCount += 1;
-    } else if (!hasSectionHeading && bodyGroupCount === 0) {
-      bodyGroupCount = 1;
-    }
-
-    const sentences = splitSentences(line.text);
-    const emphasis = chooseSentenceEmphasis(sentences);
-    sentences.forEach((sentence, sentenceIndex) => {
-      blocks.push(
-        makeBlock(
-          "p",
-          sentence,
-          emphasis.highlightIndex === sentenceIndex && emphasis.underlineIndex !== sentenceIndex,
-          emphasis.underlineIndex === sentenceIndex,
-        ),
-      );
+    splitIntoInfoBlocks(line.text).forEach((paragraph) => {
+      blocks.push(makeBlock("p", paragraph, false, false, createRuleBasedSegments(paragraph, "p")));
     });
   });
 
@@ -281,35 +269,102 @@ function getMarkdownHeading(line: string) {
   };
 }
 
-function splitSentences(line: string): string[] {
-  const parts = line.match(/[^。！？!?；;]+[。！？!?；;]?/g) ?? [line];
-  return parts.map((part) => part.trim()).filter(Boolean);
-}
+type TextRange = {
+  start: number;
+  end: number;
+};
 
-function chooseSentenceEmphasis(sentences: string[]) {
-  const highlightIndex = chooseBestIndex(sentences, scoreHighlightSentence, 3);
-  const underlineIndex = chooseBestIndex(sentences, scoreUnderlineSentence, 4);
+function splitIntoInfoBlocks(line: string): string[] {
+  const units = getSentenceRanges(line).flatMap((range) => splitLongSentenceRange(line, range));
+  if (!units.length) return [line].filter(Boolean);
 
-  return { highlightIndex, underlineIndex };
-}
+  const blocks: TextRange[] = [];
+  let current: TextRange | null = null;
+  let currentUnitCount = 0;
 
-function chooseBestIndex(
-  sentences: string[],
-  scorer: (sentence: string, index: number, total: number) => number,
-  threshold: number,
-) {
-  let bestIndex = -1;
-  let bestScore = Number.NEGATIVE_INFINITY;
-
-  sentences.forEach((sentence, index) => {
-    const score = scorer(sentence, index, sentences.length);
-    if (score > bestScore || (score === bestScore && index === sentences.length - 1)) {
-      bestIndex = index;
-      bestScore = score;
+  units.forEach((unit) => {
+    if (!current) {
+      current = { ...unit };
+      currentUnitCount = 1;
+      return;
     }
+
+    const currentLength = getComparableTextLength(line.slice(current.start, current.end));
+    const nextLength = getComparableTextLength(line.slice(current.start, unit.end));
+    const canAddUnit = currentUnitCount < infoBlockMaxUnits;
+    const shouldMergeShortBlock = currentLength < infoBlockMinLength && nextLength <= infoBlockForcedMaxLength;
+    const fitsTargetBlock = nextLength <= infoBlockTargetMaxLength;
+
+    if (canAddUnit && (shouldMergeShortBlock || fitsTargetBlock)) {
+      current.end = unit.end;
+      currentUnitCount += 1;
+      return;
+    }
+
+    blocks.push(current);
+    current = { ...unit };
+    currentUnitCount = 1;
   });
 
-  return bestScore >= threshold ? bestIndex : -1;
+  if (current) blocks.push(current);
+
+  mergeShortTrailingBlock(line, blocks);
+
+  return blocks.map((range) => line.slice(range.start, range.end).trim()).filter(Boolean);
+}
+
+function splitLongSentenceRange(line: string, range: TextRange): TextRange[] {
+  const sentence = line.slice(range.start, range.end);
+  if (getComparableTextLength(sentence) <= longSentenceSplitLength) return [range];
+
+  const clauses = getRegexRanges(sentence, softClausePattern).map((clause) => ({
+    start: range.start + clause.start,
+    end: range.start + clause.end,
+  }));
+
+  return clauses.length > 1 ? clauses : [range];
+}
+
+function mergeShortTrailingBlock(line: string, blocks: TextRange[]) {
+  if (blocks.length < 2) return;
+
+  const last = blocks[blocks.length - 1];
+  const previous = blocks[blocks.length - 2];
+  const lastLength = getComparableTextLength(line.slice(last.start, last.end));
+  const mergedLength = getComparableTextLength(line.slice(previous.start, last.end));
+
+  if (lastLength < infoBlockMinLength && mergedLength <= infoBlockForcedMaxLength) {
+    previous.end = last.end;
+    blocks.pop();
+  }
+}
+
+function getSentenceRanges(text: string): TextRange[] {
+  const ranges = getRegexRanges(text, hardSentencePattern);
+  return ranges.length ? ranges : trimTextRange(text, 0, text.length);
+}
+
+function getRegexRanges(text: string, pattern: RegExp): TextRange[] {
+  const ranges: TextRange[] = [];
+  const regex = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text))) {
+    const range = trimTextRange(text, match.index, match.index + match[0].length);
+    ranges.push(...range);
+  }
+
+  return ranges;
+}
+
+function trimTextRange(text: string, start: number, end: number): TextRange[] {
+  let nextStart = start;
+  let nextEnd = end;
+
+  while (nextStart < nextEnd && /\s/.test(text[nextStart])) nextStart += 1;
+  while (nextEnd > nextStart && /\s/.test(text[nextEnd - 1])) nextEnd -= 1;
+
+  return nextStart < nextEnd ? [{ start: nextStart, end: nextEnd }] : [];
 }
 
 function chooseBestIndexExcept(
@@ -344,17 +399,6 @@ function scoreHighlightSentence(sentence: string, index: number, total: number) 
   if (/\d+(\.\d+)?\s*(%|倍|个|条|步|天|分钟|小时|元)/.test(sentence)) score += 2;
   if (sentence.length >= 12 && sentence.length <= 70) score += 1;
   if (sentence.length < 8 || sentence.length > 96) score -= 2;
-
-  return score;
-}
-
-function scoreUnderlineSentence(sentence: string, index: number, total: number) {
-  let score = 0;
-
-  if (underlinePattern.test(sentence)) score += 4;
-  if (/(容易|常见|发布前|最后|遗漏|检查|确认)/.test(sentence)) score += 2;
-  if ((index === 0 || index === total - 1) && total > 1) score += 1;
-  if (sentence.length > 88) score -= 2;
 
   return score;
 }
@@ -407,7 +451,7 @@ function prepareAiDraftBlock(block: ContentBlock): ContentBlock {
 
   return {
     ...block,
-    segments: cleanDraftSegments(block),
+    segments: cleanDraftSegments(block) ?? createRuleBasedSegments(block.text, block.type),
     highlight: false,
     underline: false,
   };
@@ -449,18 +493,29 @@ function shouldKeepInlineColor(
   const segmentText = segment.text.trim();
   const segmentLength = getComparableTextLength(segmentText);
   const blockLength = getComparableTextLength(block.text);
+  const isWholeSingleSentenceBlock = isWholeSingleSentenceSegment(block.text, segmentText);
 
   if (segmentLength < minInlineColorLength || segmentLength > maxInlineColorLength) return false;
-  if (blockLength > 0 && segmentLength / blockLength > maxInlineColorRatio) return false;
-  if (inlineColorSentencePunctuation.test(segmentText)) return false;
+  if (getSentenceRanges(segmentText).length > 1) return false;
+  if (blockLength > 0 && segmentLength / blockLength > maxInlineColorRatio && !isWholeSingleSentenceBlock) {
+    return false;
+  }
   if (coloredSegments >= maxInlineColorSegmentsPerBlock) return false;
   if (coloredChars + segmentLength > maxInlineColorCharsPerBlock) return false;
 
-  return inlineColorMeaningPatterns[segment.color].test(segmentText);
+  return scoreInlineColorCandidate(segmentText, segment.color) >= inlineColorScoreThreshold;
+}
+
+function isWholeSingleSentenceSegment(blockText: string, segmentText: string) {
+  return getSentenceRanges(blockText).length <= 1 && getComparableText(blockText) === getComparableText(segmentText);
+}
+
+function getComparableText(text: string) {
+  return text.replace(/\s/g, "");
 }
 
 function getComparableTextLength(text: string) {
-  return Array.from(text.replace(/\s/g, "")).length;
+  return Array.from(getComparableText(text)).length;
 }
 
 function applyRuleBasedEmphasis(blocks: ContentBlock[]): ContentBlock[] {
@@ -475,12 +530,8 @@ function applyRuleBasedEmphasis(blocks: ContentBlock[]): ContentBlock[] {
     if (!paragraphIndexes.length) return;
 
     const sentences = paragraphIndexes.map((blockIndex) => emphasizedBlocks[blockIndex].text);
-    const underlineIndex = chooseBestIndex(sentences, scoreUnderlineSentence, 4);
+    const underlineIndex = -1;
     const highlightIndex = chooseBestIndexExcept(sentences, scoreHighlightSentence, 3, underlineIndex);
-
-    if (underlineIndex >= 0) {
-      emphasizedBlocks[paragraphIndexes[underlineIndex]].underline = true;
-    }
 
     if (highlightIndex >= 0) {
       emphasizedBlocks[paragraphIndexes[highlightIndex]].highlight = true;
@@ -500,6 +551,104 @@ function applyRuleBasedEmphasis(blocks: ContentBlock[]): ContentBlock[] {
   flushParagraphGroup();
 
   return emphasizedBlocks;
+}
+
+type StyledRange = {
+  start: number;
+  end: number;
+  color: InlineColor;
+  score: number;
+};
+
+function createRuleBasedSegments(text: string, blockType: ContentBlock["type"]): TextSegment[] | undefined {
+  if (blockType !== "p") return undefined;
+
+  const selectedRange = chooseInlineColorRange(text);
+  if (!selectedRange) return undefined;
+
+  const segments: TextSegment[] = [];
+  let cursor = 0;
+
+  if (selectedRange.start > cursor) {
+    segments.push({ text: text.slice(cursor, selectedRange.start) });
+  }
+  segments.push({ text: text.slice(selectedRange.start, selectedRange.end), bold: true, color: selectedRange.color });
+  cursor = selectedRange.end;
+
+  if (cursor < text.length) {
+    segments.push({ text: text.slice(cursor) });
+  }
+
+  return normalizeTextSegments(segments);
+}
+
+function chooseInlineColorRange(text: string): StyledRange | undefined {
+  const ranges = getInlineColorCandidateRanges(text)
+    .flatMap((range) => {
+      const candidateText = text.slice(range.start, range.end).trim();
+      return (["red", "blue"] as InlineColor[]).map((color) => ({
+        ...range,
+        color,
+        score: scoreInlineColorCandidate(candidateText, color),
+      }));
+    })
+    .filter((range) => range.score >= inlineColorScoreThreshold)
+    .sort((a, b) => {
+      const scoreDelta = b.score - a.score;
+      if (scoreDelta !== 0) return scoreDelta;
+      if (a.color !== b.color) return a.color === "red" ? -1 : 1;
+      return b.end - b.start - (a.end - a.start) || a.start - b.start;
+    });
+
+  return ranges[0];
+}
+
+function getInlineColorCandidateRanges(text: string): TextRange[] {
+  const ranges: TextRange[] = [];
+  const addRange = (range: TextRange) => {
+    const length = getComparableTextLength(text.slice(range.start, range.end));
+    const alreadyExists = ranges.some((item) => item.start === range.start && item.end === range.end);
+    if (!alreadyExists && length >= minInlineColorLength && length <= maxInlineColorLength) {
+      ranges.push(range);
+    }
+  };
+
+  getSentenceRanges(text).forEach((sentenceRange) => {
+    addRange(sentenceRange);
+
+    const sentence = text.slice(sentenceRange.start, sentenceRange.end);
+    const clauseRanges = getRegexRanges(sentence, softClausePattern).map((range) => ({
+      start: sentenceRange.start + range.start,
+      end: sentenceRange.start + range.end,
+    }));
+
+    if (clauseRanges.length > 1) {
+      clauseRanges.forEach(addRange);
+    }
+  });
+
+  return ranges;
+}
+
+function scoreInlineColorCandidate(text: string, color: InlineColor) {
+  const length = getComparableTextLength(text);
+  if (length < minInlineColorLength || length > maxInlineColorLength) return Number.NEGATIVE_INFINITY;
+
+  let score = 0;
+
+  if (inlineColorCuePatterns[color].test(text)) score += 4;
+  if (color === "red" && inlineRedActionPattern.test(text)) score += 2;
+  if (color === "blue" && inlineBlueActionPattern.test(text)) score += 2;
+  if (color === "blue" && summaryPattern.test(text)) score += 2;
+  if (color === "blue" && /\d+(\.\d+)?\s*(%|倍|个|条|步|天|分钟|小时|元)/.test(text)) score += 2;
+  if (color === "blue" && /(才是|就能|即可|更重要|更适合|更容易|更值得|更清楚|更稳定|更有效)/.test(text)) {
+    score += 2;
+  }
+  if (color === "red" && /(太多|过度|反而|否则|一旦|导致|失去|降低|变差)/.test(text)) score += 1;
+  if (color === "blue" && /(不是.+而是|只解决一个问题|一直在获得信息)/.test(text)) score += 1;
+  if (length >= 12 && length <= 45) score += 1;
+
+  return score;
 }
 
 function escapeInlineMarkdown(text: string): string {

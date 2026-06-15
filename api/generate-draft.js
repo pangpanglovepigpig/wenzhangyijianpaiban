@@ -1,10 +1,11 @@
 const DEEPSEEK_ENDPOINT = "https://api.deepseek.com/chat/completions";
 const DEFAULT_MODEL = "deepseek-v4-flash";
 const MAX_INPUT_LENGTH = 12000;
-const MAX_BLOCKS = 120;
+const MAX_BLOCKS = 600;
 const DEFAULT_REQUEST_TIMEOUT_MS = 55000;
 const MAX_REQUEST_TIMEOUT_MS = 55000;
-const LOCAL_FALLBACK_NOTICE = "DeepSeek 暂时响应较慢，已先用本地规则生成可编辑初稿。";
+const LOCAL_FALLBACK_NOTICE = "DeepSeek 暂时响应较慢，已用本地规则生成保留原文的初稿。";
+const SOURCE_REPAIR_NOTICE = "DeepSeek 返回内容未完整保留原文，已改用本地排版规则。";
 const SLOW_RESPONSE_ERROR =
   "DeepSeek 当前响应较慢或繁忙，这次没有生成初稿。请稍后重试，或确认线上 DEEPSEEK_TIMEOUT_MS 已设为 55000 后重新部署。";
 const VALID_BLOCK_TYPES = new Set(["h1", "h2", "h3", "p", "hr"]);
@@ -12,7 +13,29 @@ const VALID_COLORS = new Set(["red", "blue"]);
 const FALLBACKABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 const endPunctuation = /[。！？!?；;，,、：:]$/;
 const markdownDividerPattern = /^-{3,}$/;
-const sentenceSplitPattern = /[^。！？!?；;]+[。！？!?；;]?/g;
+const hardSentencePattern = /[^。！？!?；;]+[。！？!?；;]?/g;
+const softClausePattern = /[^，,：:、]+[，,：:、]?/g;
+const sourceH3Pattern = /^(第[一二三四五六七八九十\d]+个层次[，,].{2,38}[。！？!?]?)$/;
+const standaloneH3Pattern = /^([一二三四五六七八九十\d]+[、.．）)]|第[一二三四五六七八九十\d]+[步章节])[^\n。！？!?；;]{2,32}$/;
+const inlineColorCuePatterns = {
+  red:
+    /(注意|提醒|不要|不能|避免|一定要|一定|必须|停止|正视|千万|尤其|小心|警惕|风险|误区|雷区|常见|错误|失败|后果|遗漏|截断|焦虑|粗心|瓶颈|恶性循环|自我否定|最可惜|最容易|降低|失去|变差|浪费|拖慢|出错|失控|检查|确认|排雷)/,
+  blue:
+    /(方法|步骤|方案|建议|做法|行动|执行|结论|总结|核心|关键|重点|原则|清单|公式|路径|策略|工具|流程|解决|完成|拆成|搭建|先把|然后|最后|所以|因此|总之|一句话|简单说|也就是说|真正|适合|值得|可以|就能|即可|提升|优化|改善|效果|效率|增长|转化|复盘|获得|抓手)/,
+};
+const inlineRedActionPattern = /^(注意|提醒|不要|不能|避免|一定|必须|千万|小心|警惕|别|停止|检查|确认)|一定要|必须要|不要把|不能把/;
+const inlineBlueActionPattern =
+  /^(先|再|然后|最后|把|用|让|给|从|只要|可以|建议|总的来说|总之|所以|因此|一句话|简单说|也就是说)|就能|即可|适合用|拆成|解决/;
+const summaryPattern =
+  /(^所以|^因此|^总之|^一句话|^最后|^简单说|^也就是说|才是|就能|即可|更重要|更适合|更容易|更值得|更清楚|更稳定|更有效)/;
+const infoBlockMinLength = 40;
+const infoBlockTargetMaxLength = 110;
+const infoBlockForcedMaxLength = 130;
+const infoBlockMaxUnits = 3;
+const longSentenceSplitLength = 110;
+const maxInlineColorLength = 60;
+const minInlineColorLength = 6;
+const inlineColorScoreThreshold = 5;
 
 export const config = {
   maxDuration: 60,
@@ -52,11 +75,17 @@ export default async function handler(req, res) {
     } catch (error) {
       if (!isFallbackableDeepSeekError(error) || !isLocalFallbackEnabled()) throw error;
 
-      rawDraft = createFallbackDraft(text);
+      rawDraft = createSourcePreservingDraft(text);
       notice = LOCAL_FALLBACK_NOTICE;
     }
 
-    const blocks = sanitizeDraft(rawDraft);
+    let blocks = sanitizeDraft(rawDraft);
+
+    if (!draftPreservesSource(blocks, text)) {
+      rawDraft = createSourcePreservingDraft(text);
+      blocks = sanitizeDraft(rawDraft);
+      notice = notice ?? SOURCE_REPAIR_NOTICE;
+    }
 
     if (!blocks.length) {
       throw new Error("DeepSeek 没有返回可用的初稿内容。");
@@ -73,7 +102,6 @@ export default async function handler(req, res) {
 async function requestDeepSeekDraft(text, apiKey) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), getRequestTimeoutMs());
-  const targetBlocks = getTargetBlockCount(text);
 
   try {
     const response = await fetch(DEEPSEEK_ENDPOINT, {
@@ -89,19 +117,23 @@ async function requestDeepSeekDraft(text, apiKey) {
             role: "system",
             content: [
               "你是小红书图文排版助手，只返回严格 JSON，不要 Markdown，不要解释。",
-              "你的任务是把用户文章整理成适合多张小红书图片展示的结构化初稿。",
+              "你的任务是把用户文章整理成适合多张小红书图片展示的结构化初稿，但只能排版，不能改文。",
               "返回格式必须是：{\"blocks\":[{\"type\":\"h1|h2|h3|p|hr\",\"text\":\"...\",\"highlight\":false,\"underline\":false,\"segments\":[{\"text\":\"...\",\"bold\":true,\"color\":\"red|blue\"}]}]}。",
               "type 只能是 h1、h2、h3、p、hr。hr 不需要 text、segments、highlight、underline。",
-              "text 必须等于 segments 中所有 text 拼接后的结果；没有局部样式时可以省略 segments。",
+              "所有非 hr 的 text 按返回顺序拼接后，必须与用户原文去除空行和分隔线后的文字完全一致。",
+              "严禁改写、删减、概括、扩写、调整文字顺序，严禁新增原文没有的小标题、总结句或过渡句。",
+              "text 必须等于 segments 中所有 text 拼接后的结果；segments 必须完整切分 text，不能漏掉空格或标点；没有局部样式时可以省略 segments。",
               "highlight 和 underline 必须始终返回 false；黄色高亮和红色波浪线由本地排版规则统一处理。",
-              "加粗用于核心结论、关键名词、重要数字、强观点。",
-              "红色只用于风险、误区、不要、必须、警告、负面后果等短词或短语。",
-              "蓝色只用于方法、步骤、方案、正向收益、可执行动作等短词或短语。",
+              "第一行默认用 h1。",
+              "h3 只能用于原文中完整存在的结构句或短段，例如“第一个层次，是因为……。”；不确定就用 p。",
+              "普通正文按信息块输出：每个 p 围绕一个完整意思，通常 1 到 3 句，约 40 到 110 字；短句要合并，超长句可以按逗号、冒号、顿号等软切分。",
+              "加粗用于核心结论、关键名词、重要数字、强观点，但必须来自原文原字。",
+              "红色用于一句提醒、风险、不要做、必须注意、常见错误等句段，不要执着固定关键词。",
+              "蓝色用于一句方法、结论、收益、行动建议、总结性判断等句段，不要执着固定关键词。",
               "segments 主要用于 p 段落；h1、h2、h3 不要使用红色或蓝色。",
-              "每个段落最多 2 处红色或蓝色，每处只标 2 到 12 个汉字左右；不要给整句、整段、带句号问号叹号分号的内容染色。",
-              "行内样式只标少量关键词或短语，不确定就不要标色，避免整段加粗或整段染色。",
-              "保留原文含义，不要虚构新信息；可以拆分长段、识别标题和小标题；可以返回必要的 hr 分隔线，但不要连续返回分隔线。",
-              `输出要精简，blocks 总数控制在 ${targetBlocks} 个以内；优先保留标题、小标题、关键结论和可执行段落，避免逐句复写原文。`,
+              "每个段落最多 1 处红色或蓝色，每处约 6 到 60 个字，可以是一条完整句子，也可以包含句号、问号、叹号或分号。",
+              "避免把多个句子或很长整段染色；不确定就不标色，避免整段加粗或整段染色。",
+              "可以拆分长段、识别原文已有标题和小标题；可以返回必要的 hr 分隔线，但不要连续返回分隔线。",
             ].join("\n"),
           },
           {
@@ -138,12 +170,17 @@ async function requestDeepSeekDraft(text, apiKey) {
     }
 
     const data = safeParseJson(responseText);
-    const content = data?.choices?.[0]?.message?.content;
+    const choice = data?.choices?.[0];
+    const content = choice?.message?.content;
     if (typeof content !== "string" || !content.trim()) {
       throw new DeepSeekRequestError("DeepSeek 返回内容为空，这次没有生成初稿。请再试一次。", true);
     }
 
-    const draft = safeParseJson(content);
+    if (choice?.finish_reason === "length") {
+      throw new DeepSeekRequestError("DeepSeek 返回内容被截断，这次没有生成初稿。请缩短原文后再试一次。", true);
+    }
+
+    const draft = parseDraftContent(content);
     if (!draft) {
       throw new DeepSeekRequestError("DeepSeek 返回格式异常，这次没有生成初稿。请再试一次。", true);
     }
@@ -182,18 +219,11 @@ function getRequestTimeoutMs() {
   return Math.min(Math.max(configured, 10000), MAX_REQUEST_TIMEOUT_MS);
 }
 
-function getTargetBlockCount(text) {
-  if (text.length > 9000) return 72;
-  if (text.length > 6000) return 58;
-  if (text.length > 3000) return 44;
-  return 32;
-}
-
 function getMaxTokensForText(text) {
-  if (text.length > 9000) return 3800;
-  if (text.length > 6000) return 3200;
-  if (text.length > 3000) return 2600;
-  return 1800;
+  if (text.length > 9000) return 18000;
+  if (text.length > 6000) return 14000;
+  if (text.length > 3000) return 9000;
+  return 5000;
 }
 
 function safeParseJson(value) {
@@ -202,6 +232,73 @@ function safeParseJson(value) {
   } catch {
     return null;
   }
+}
+
+function parseDraftContent(content) {
+  const parsed = parseJsonLoose(content);
+  if (!parsed) return null;
+  if (Array.isArray(parsed)) return { blocks: parsed };
+  if (Array.isArray(parsed?.blocks)) return parsed;
+  if (Array.isArray(parsed?.data?.blocks)) return parsed.data;
+
+  return parsed;
+}
+
+function parseJsonLoose(value) {
+  const trimmed = String(value ?? "").trim().replace(/^\uFEFF/, "");
+  if (!trimmed) return null;
+
+  const direct = safeParseJson(trimmed);
+  if (direct) return direct;
+
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  if (fenced) {
+    const parsedFence = safeParseJson(fenced[1].trim());
+    if (parsedFence) return parsedFence;
+  }
+
+  const candidate = extractJsonCandidate(trimmed);
+  return candidate ? safeParseJson(candidate) : null;
+}
+
+function extractJsonCandidate(value) {
+  for (let start = 0; start < value.length; start += 1) {
+    const opening = value[start];
+    if (opening !== "{" && opening !== "[") continue;
+
+    const closing = opening === "{" ? "}" : "]";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < value.length; index += 1) {
+      const char = value[index];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === "\"") {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === "\"") {
+        inString = true;
+      } else if (char === opening) {
+        depth += 1;
+      } else if (char === closing) {
+        depth -= 1;
+        if (depth === 0) {
+          return value.slice(start, index + 1);
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 async function readJsonBody(req) {
@@ -255,11 +352,11 @@ function sanitizeSegments(segments) {
 
   const normalized = segments
     .map((segment) => ({
-      text: sanitizeText(segment?.text),
+      text: sanitizeSegmentText(segment?.text),
       bold: segment?.bold === true || undefined,
       color: VALID_COLORS.has(segment?.color) ? segment.color : undefined,
     }))
-    .filter((segment) => segment.text.trim().length > 0);
+    .filter((segment) => segment.text.length > 0);
 
   if (!normalized.length) return undefined;
 
@@ -279,6 +376,10 @@ function sanitizeText(value) {
   return String(value ?? "").replace(/\s*\n+\s*/g, " ").trim();
 }
 
+function sanitizeSegmentText(value) {
+  return String(value ?? "").replace(/\s*\n+\s*/g, " ");
+}
+
 function compactDividers(blocks) {
   const compacted = blocks.filter((block, index, all) => {
     if (block.type !== "hr") return true;
@@ -296,12 +397,42 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function createFallbackDraft(text) {
-  const lines = text
+function draftPreservesSource(blocks, sourceText) {
+  const source = getComparableSourceText(sourceText);
+  const draft = getComparableDraftText(blocks);
+  if (!source || source !== draft) return false;
+
+  return blocks.every((block) => {
+    if (block.type === "hr") return true;
+    return sourceText.includes(block.text);
+  });
+}
+
+function getComparableSourceText(text) {
+  return getSourceLines(text)
+    .filter((line) => !markdownDividerPattern.test(line))
+    .join("")
+    .replace(/\s/g, "");
+}
+
+function getComparableDraftText(blocks) {
+  return blocks
+    .filter((block) => block.type !== "hr")
+    .map((block) => block.text)
+    .join("")
+    .replace(/\s/g, "");
+}
+
+function getSourceLines(text) {
+  return text
     .replace(/\r\n/g, "\n")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function createSourcePreservingDraft(text) {
+  const lines = getSourceLines(text);
 
   const blocks = [];
   let hasTitle = false;
@@ -314,34 +445,35 @@ function createFallbackDraft(text) {
       return;
     }
 
-    const markdownHeading = getFallbackMarkdownHeading(line);
-    if (markdownHeading) {
-      if (markdownHeading.level === 1 && !hasTitle) {
-        blocks.push(createFallbackBlock("h1", markdownHeading.text));
-        hasTitle = true;
-        return;
-      }
-
+    if (!hasTitle) {
+      blocks.push(createFallbackBlock("h1", line));
+      hasTitle = true;
       addFallbackDivider(blocks);
-      blocks.push(createFallbackBlock(markdownHeading.level === 2 ? "h2" : "h3", markdownHeading.text));
       return;
     }
 
-    if (!hasTitle) {
-      blocks.push(createFallbackBlock("h1", cleanFallbackPrefix(line)));
-      hasTitle = true;
+    const markdownHeading = getFallbackMarkdownHeading(line);
+    if (markdownHeading) {
+      addFallbackDivider(blocks);
+      blocks.push(createFallbackBlock(markdownHeading.level === 2 ? "h2" : "h3", line));
       return;
     }
 
     if (isFallbackHeading(line, index)) {
       addFallbackDivider(blocks);
-      blocks.push(createFallbackBlock("h2", cleanFallbackPrefix(line)));
+      blocks.push(createFallbackBlock("h3", line));
       return;
     }
 
-    splitFallbackSentences(line).forEach((sentence) => {
+    splitIntoInfoBlocks(line).forEach((sentence) => {
       if (blocks.length < MAX_BLOCKS) {
-        blocks.push(createFallbackBlock("p", sentence));
+        if (isSourceH3Candidate(sentence)) {
+          addFallbackDivider(blocks);
+          blocks.push(createFallbackBlock("h3", sentence));
+          return;
+        }
+
+        blocks.push(createFallbackBlock("p", sentence, decorateFallbackSegments(sentence)));
       }
     });
   });
@@ -361,41 +493,112 @@ function getFallbackMarkdownHeading(line) {
 
 function isFallbackHeading(line, index) {
   if (index <= 0) return false;
-  if (line.length > 28 || endPunctuation.test(line)) return false;
+  if (line.length > 34 || endPunctuation.test(line)) return false;
 
-  return /^(第.+[章节步]|[一二三四五六七八九十\d]+[、.．）)]|[-*]\s*)?[\u4e00-\u9fa5A-Za-z0-9\s《》“”""：:]+$/.test(line);
+  return standaloneH3Pattern.test(line);
 }
 
-function splitFallbackSentences(line) {
-  if (line.length <= 54) return [line];
+function splitIntoInfoBlocks(line) {
+  const units = getSentenceRanges(line).flatMap((range) => splitLongSentenceRange(line, range));
+  if (!units.length) return line ? [line] : [];
 
-  const sentences = line.match(sentenceSplitPattern)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [line];
-  const result = [];
-  let buffer = "";
+  const blocks = [];
+  let current = null;
+  let currentUnitCount = 0;
 
-  sentences.forEach((sentence) => {
-    const next = buffer ? `${buffer}${sentence}` : sentence;
-    if (next.length <= 72) {
-      buffer = next;
+  units.forEach((unit) => {
+    if (!current) {
+      current = { ...unit };
+      currentUnitCount = 1;
       return;
     }
 
-    if (buffer) result.push(buffer);
-    buffer = sentence;
+    const currentLength = getComparableTextLength(line.slice(current.start, current.end));
+    const nextLength = getComparableTextLength(line.slice(current.start, unit.end));
+    const canAddUnit = currentUnitCount < infoBlockMaxUnits;
+    const shouldMergeShortBlock = currentLength < infoBlockMinLength && nextLength <= infoBlockForcedMaxLength;
+    const fitsTargetBlock = nextLength <= infoBlockTargetMaxLength;
+
+    if (canAddUnit && (shouldMergeShortBlock || fitsTargetBlock)) {
+      current.end = unit.end;
+      currentUnitCount += 1;
+      return;
+    }
+
+    blocks.push(current);
+    current = { ...unit };
+    currentUnitCount = 1;
   });
 
-  if (buffer) result.push(buffer);
-  return result;
+  if (current) blocks.push(current);
+
+  mergeShortTrailingBlock(line, blocks);
+
+  return blocks.map((range) => line.slice(range.start, range.end).trim()).filter(Boolean);
 }
 
-function cleanFallbackPrefix(line) {
-  return line.replace(/^([一二三四五六七八九十]+[、.．]|第[一二三四五六七八九十\d]+[步章节]|[0-9]+[、.．]|\d+\s*[）)]|[-*]\s*)/, "").trim();
+function splitLongSentenceRange(line, range) {
+  const sentence = line.slice(range.start, range.end);
+  if (getComparableTextLength(sentence) <= longSentenceSplitLength) return [range];
+
+  const clauses = getRegexRanges(sentence, softClausePattern).map((clause) => ({
+    start: range.start + clause.start,
+    end: range.start + clause.end,
+  }));
+
+  return clauses.length > 1 ? clauses : [range];
 }
 
-function createFallbackBlock(type, text = "") {
+function mergeShortTrailingBlock(line, blocks) {
+  if (blocks.length < 2) return;
+
+  const last = blocks[blocks.length - 1];
+  const previous = blocks[blocks.length - 2];
+  const lastLength = getComparableTextLength(line.slice(last.start, last.end));
+  const mergedLength = getComparableTextLength(line.slice(previous.start, last.end));
+
+  if (lastLength < infoBlockMinLength && mergedLength <= infoBlockForcedMaxLength) {
+    previous.end = last.end;
+    blocks.pop();
+  }
+}
+
+function getSentenceRanges(text) {
+  const ranges = getRegexRanges(text, hardSentencePattern);
+  return ranges.length ? ranges : trimTextRange(text, 0, text.length);
+}
+
+function getRegexRanges(text, pattern) {
+  const ranges = [];
+  const regex = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+  let match;
+
+  while ((match = regex.exec(text))) {
+    ranges.push(...trimTextRange(text, match.index, match.index + match[0].length));
+  }
+
+  return ranges;
+}
+
+function trimTextRange(text, start, end) {
+  let nextStart = start;
+  let nextEnd = end;
+
+  while (nextStart < nextEnd && /\s/.test(text[nextStart])) nextStart += 1;
+  while (nextEnd > nextStart && /\s/.test(text[nextEnd - 1])) nextEnd -= 1;
+
+  return nextStart < nextEnd ? [{ start: nextStart, end: nextEnd }] : [];
+}
+
+function isSourceH3Candidate(sentence) {
+  return sourceH3Pattern.test(sentence);
+}
+
+function createFallbackBlock(type, text = "", segments) {
   return {
     type,
     text,
+    segments,
     highlight: false,
     underline: false,
   };
@@ -406,4 +609,97 @@ function addFallbackDivider(blocks) {
   if (previous && previous.type !== "hr") {
     blocks.push(createFallbackBlock("hr"));
   }
+}
+
+function decorateFallbackSegments(text) {
+  const selectedRange = chooseInlineColorRange(text);
+  if (!selectedRange) return undefined;
+
+  const segments = [];
+  let cursor = 0;
+
+  if (selectedRange.start > cursor) {
+    segments.push({ text: text.slice(cursor, selectedRange.start) });
+  }
+  segments.push({ text: text.slice(selectedRange.start, selectedRange.end), bold: true, color: selectedRange.color });
+  cursor = selectedRange.end;
+
+  if (cursor < text.length) {
+    segments.push({ text: text.slice(cursor) });
+  }
+
+  return segments;
+}
+
+function chooseInlineColorRange(text) {
+  const ranges = getInlineColorCandidateRanges(text)
+    .flatMap((range) => {
+      const candidateText = text.slice(range.start, range.end).trim();
+      return ["red", "blue"].map((color) => ({
+        ...range,
+        color,
+        score: scoreInlineColorCandidate(candidateText, color),
+      }));
+    })
+    .filter((range) => range.score >= inlineColorScoreThreshold)
+    .sort((a, b) => {
+      const scoreDelta = b.score - a.score;
+      if (scoreDelta !== 0) return scoreDelta;
+      if (a.color !== b.color) return a.color === "red" ? -1 : 1;
+      return b.end - b.start - (a.end - a.start) || a.start - b.start;
+    });
+
+  return ranges[0];
+}
+
+function getInlineColorCandidateRanges(text) {
+  const ranges = [];
+  const addRange = (range) => {
+    const length = getComparableTextLength(text.slice(range.start, range.end));
+    const alreadyExists = ranges.some((item) => item.start === range.start && item.end === range.end);
+    if (!alreadyExists && length >= minInlineColorLength && length <= maxInlineColorLength) {
+      ranges.push(range);
+    }
+  };
+
+  getSentenceRanges(text).forEach((sentenceRange) => {
+    addRange(sentenceRange);
+
+    const sentence = text.slice(sentenceRange.start, sentenceRange.end);
+    const clauseRanges = getRegexRanges(sentence, softClausePattern).map((range) => ({
+      start: sentenceRange.start + range.start,
+      end: sentenceRange.start + range.end,
+    }));
+
+    if (clauseRanges.length > 1) {
+      clauseRanges.forEach(addRange);
+    }
+  });
+
+  return ranges;
+}
+
+function scoreInlineColorCandidate(text, color) {
+  const length = getComparableTextLength(text);
+  if (length < minInlineColorLength || length > maxInlineColorLength) return Number.NEGATIVE_INFINITY;
+
+  let score = 0;
+
+  if (inlineColorCuePatterns[color].test(text)) score += 4;
+  if (color === "red" && inlineRedActionPattern.test(text)) score += 2;
+  if (color === "blue" && inlineBlueActionPattern.test(text)) score += 2;
+  if (color === "blue" && summaryPattern.test(text)) score += 2;
+  if (color === "blue" && /\d+(\.\d+)?\s*(%|倍|个|条|步|天|分钟|小时|元)/.test(text)) score += 2;
+  if (color === "blue" && /(才是|就能|即可|更重要|更适合|更容易|更值得|更清楚|更稳定|更有效)/.test(text)) {
+    score += 2;
+  }
+  if (color === "red" && /(太多|过度|反而|否则|一旦|导致|失去|降低|变差)/.test(text)) score += 1;
+  if (color === "blue" && /(不是.+而是|只解决一个问题|一直在获得信息)/.test(text)) score += 1;
+  if (length >= 12 && length <= 45) score += 1;
+
+  return score;
+}
+
+function getComparableTextLength(text) {
+  return Array.from(String(text ?? "").replace(/\s/g, "")).length;
 }
