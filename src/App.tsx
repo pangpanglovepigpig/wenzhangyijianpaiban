@@ -107,6 +107,15 @@ export function App() {
     return () => cancelAnimationFrame(frame);
   }, [blocks, cardStyle]);
 
+  function formatSourceText() {
+    const nextBlocks = createBlocksFromText(sourceText);
+    setBlocks(nextBlocks);
+    setSelectedId(nextBlocks[0]?.id ?? null);
+    setDraftError(null);
+    setDraftNotice(null);
+    clearImages();
+  }
+
   async function generateDraft() {
     if (!ENABLE_AI_DRAFT) return;
 
@@ -232,12 +241,18 @@ export function App() {
               <p className="eyebrow">Article</p>
               <h1>小红书图文排版</h1>
             </div>
-            {ENABLE_AI_DRAFT && (
-              <button className="primary-button" onClick={generateDraft} disabled={isDraftGenerating}>
-                <RefreshCcw size={18} />
-                {isDraftGenerating ? "AI生成中" : "生成初稿"}
+            <div className="input-actions">
+              <button className="primary-button" onClick={formatSourceText} disabled={!sourceText.trim()}>
+                <Rows3 size={18} />
+                排版文章
               </button>
-            )}
+              {ENABLE_AI_DRAFT && (
+                <button className="secondary-button" onClick={generateDraft} disabled={isDraftGenerating}>
+                  <RefreshCcw size={18} />
+                  {isDraftGenerating ? "AI生成中" : "生成初稿"}
+                </button>
+              )}
+            </div>
           </div>
 
           <textarea

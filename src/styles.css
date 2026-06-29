@@ -292,10 +292,16 @@ h2 {
 }
 
 .toolbar,
+.input-actions,
 .export-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.input-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .tool,
