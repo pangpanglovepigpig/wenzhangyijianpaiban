@@ -38,16 +38,30 @@ describe("createBlocksFromText", () => {
     expect(paragraphText(blocks)).toContain("第五句收束这个自然段");
   });
 
-  test("adds gentle dividers between body sections when there are no explicit subheadings", () => {
+  test("does not add dividers merely because blank-separated paragraphs continue the same idea", () => {
     const blocks = createBlocksFromText(`日常观察
 
-第一段铺垫背景，先把事情的来龙去脉讲清楚。
+家长晚上发来一大段消息，明明已经洗漱躺下了，还是撑着眼皮回。
 
-第二段继续补充前面的情绪和场景，仍然属于开头板块。
+学生一撒娇、一委屈，就想把所有问题都揽到自己身上。
 
-第三段开始切换到解决做法，读者需要看到新的板块节奏。
+同事临时拜托，也不好意思拒绝，最后只能把自己的安排往后放。
 
-第四段继续补充这个做法，和第三段放在同一个板块里。`);
+这些内容虽然分成了几段，但说的还是同一种状态，不应该被分隔线切开。`);
+
+    expect(hrCount(blocks)).toBe(1);
+  });
+
+  test("adds a divider when content shifts from scene description to advice", () => {
+    const blocks = createBlocksFromText(`日常观察
+
+家长晚上发来一大段消息，明明已经洗漱躺下了，还是撑着眼皮回。
+
+学生一撒娇、一委屈，就想把所有问题都揽到自己身上。
+
+真正要调整的，是你对责任边界的判断。
+
+具体做法是，先判断这件事是不是必须马上回复，再决定要不要立刻接住。`);
 
     expect(types(blocks)).toEqual(["h1", "hr", "p", "p", "hr", "p", "p"]);
   });

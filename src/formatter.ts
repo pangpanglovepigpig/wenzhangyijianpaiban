@@ -50,6 +50,11 @@ const longSentenceSplitLength = 78;
 const orphanInfoBlockMaxLength = 6;
 const implicitSectionMinParagraphs = 2;
 const implicitSectionMinChars = 180;
+const implicitSectionOpeningPattern =
+  /^(真正|关键|核心|重点|结论|建议|方法|做法|解决|接下来|下一步|所以|因此|总之|最后|一句话|简单说|也就是说|具体做法|具体来说|注意|提醒|不要|不能|避免|必须|一定要|首先|其次|第一|第二|第三|另外|另一方面|换句话说)/;
+const implicitSectionAdvicePattern = /(调整|判断|做法|方法|建议|解决|可以|应该|需要|先|再|步骤|原则|边界)/;
+const implicitSectionScenePattern = /(家长|学生|同事|领导|孩子|老师|消息|任务|拜托|撒娇|委屈|情绪|状态|场景|问题)/;
+const continuationOpeningPattern = /^(这些|这种|同时|也|还|而且|然后|后来|前面|刚开始|上面|这时候)/;
 const maxInlineColorLength = 60;
 const minInlineColorLength = 6;
 const maxInlineColorRatio = 0.86;
@@ -87,8 +92,7 @@ export function createBlocksFromText(input: string): ContentBlock[] {
 
   const blocks: ContentBlock[] = [];
   let hasTitle = false;
-  let sectionParagraphCount = 0;
-  let sectionTextLength = 0;
+  let sectionParagraphTexts: string[] = [];
   const hasExplicitSections = lines.some((line, index) => {
     if (index === 0 || markdownDividerPattern.test(line.text)) return false;
     const markdownHeading = getMarkdownHeading(line.text);
@@ -96,8 +100,7 @@ export function createBlocksFromText(input: string): ContentBlock[] {
   });
 
   const resetSectionStats = () => {
-    sectionParagraphCount = 0;
-    sectionTextLength = 0;
+    sectionParagraphTexts = [];
   };
 
   lines.forEach((line, index) => {
@@ -143,7 +146,7 @@ export function createBlocksFromText(input: string): ContentBlock[] {
       return;
     }
 
-    if (shouldStartImplicitSection(blocks, hasExplicitSections, line, sectionParagraphCount, sectionTextLength)) {
+    if (shouldStartImplicitSection(blocks, hasExplicitSections, line, sectionParagraphTexts)) {
       addDividerIfNeeded(blocks);
       resetSectionStats();
     }
@@ -151,8 +154,7 @@ export function createBlocksFromText(input: string): ContentBlock[] {
     splitIntoInfoBlocks(line.text).forEach((paragraph) => {
       blocks.push(makeBlock("p", paragraph, false, false, createRuleBasedSegments(paragraph, "p")));
     });
-    sectionParagraphCount += 1;
-    sectionTextLength += getComparableTextLength(line.text);
+    sectionParagraphTexts.push(line.text);
   });
 
   if (!blocks.some((block) => block.type === "h1") && blocks[0]) {
@@ -467,15 +469,31 @@ function shouldStartImplicitSection(
   blocks: ContentBlock[],
   hasExplicitSections: boolean,
   line: TextLine,
-  sectionParagraphCount: number,
-  sectionTextLength: number,
+  sectionParagraphTexts: string[],
 ) {
   if (hasExplicitSections) return false;
   if (!line.hasBlankBefore) return false;
-  if (sectionParagraphCount === 0) return false;
+  if (sectionParagraphTexts.length === 0) return false;
   if (blocks[blocks.length - 1]?.type === "hr") return false;
 
-  return sectionParagraphCount >= implicitSectionMinParagraphs || sectionTextLength >= implicitSectionMinChars;
+  const sectionTextLength = sectionParagraphTexts.reduce((total, text) => total + getComparableTextLength(text), 0);
+  const hasEnoughContext =
+    sectionParagraphTexts.length >= implicitSectionMinParagraphs || sectionTextLength >= implicitSectionMinChars;
+
+  return hasEnoughContext && scoreImplicitSectionShift(line.text, sectionParagraphTexts) >= 4;
+}
+
+function scoreImplicitSectionShift(currentText: string, previousTexts: string[]) {
+  const previousText = previousTexts.join("");
+  let score = 0;
+
+  if (implicitSectionOpeningPattern.test(currentText)) score += 4;
+  if (implicitSectionAdvicePattern.test(currentText)) score += 2;
+  if (implicitSectionScenePattern.test(previousText) && implicitSectionAdvicePattern.test(currentText)) score += 2;
+  if (/^(\d+[、.．）)]|[一二三四五六七八九十]+[、.．])/.test(currentText)) score += 4;
+  if (continuationOpeningPattern.test(currentText)) score -= 4;
+
+  return score;
 }
 
 function chooseBestIndexExcept(
