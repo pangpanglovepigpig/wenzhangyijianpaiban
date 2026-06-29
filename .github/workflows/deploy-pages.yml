@@ -32,6 +32,9 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          VITE_ENABLE_AI_DRAFT: "false"
+          VITE_BASE_PATH: /wenzhangyijianpaiban/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

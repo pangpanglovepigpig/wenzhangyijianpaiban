@@ -15,7 +15,6 @@ import {
   Underline,
 } from "lucide-react";
 import { exportPagesToPng, measureBlocksForPng, type ExportedImage } from "./exportImage";
-import { generateDraftWithDeepSeek } from "./draftApi";
 import { blocksToMarkdown, createBlocksFromText, IMAGE_CONFIG, makeBlock, sampleArticle } from "./formatter";
 import { paginateBlocks } from "./pagination";
 import {
@@ -26,6 +25,8 @@ import {
   type ResolvedCardStyle,
 } from "./cardStyle";
 import type { CardStyleSettings, ContentBlock, FontFamilyId, PageModel } from "./types";
+
+const ENABLE_AI_DRAFT = import.meta.env.VITE_ENABLE_AI_DRAFT === "true";
 
 export function App() {
   const [sourceText, setSourceText] = useState(sampleArticle);
@@ -107,6 +108,8 @@ export function App() {
   }, [blocks, cardStyle]);
 
   async function generateDraft() {
+    if (!ENABLE_AI_DRAFT) return;
+
     const requestId = draftRequestRef.current + 1;
     draftRequestRef.current = requestId;
     setIsDraftGenerating(true);
@@ -114,6 +117,7 @@ export function App() {
     setDraftNotice(null);
 
     try {
+      const { generateDraftWithDeepSeek } = await import("./draftApi");
       const result = await generateDraftWithDeepSeek(sourceText);
       if (draftRequestRef.current !== requestId) return;
 
@@ -228,10 +232,12 @@ export function App() {
               <p className="eyebrow">Article</p>
               <h1>小红书图文排版</h1>
             </div>
-            <button className="primary-button" onClick={generateDraft} disabled={isDraftGenerating}>
-              <RefreshCcw size={18} />
-              {isDraftGenerating ? "AI生成中" : "生成初稿"}
-            </button>
+            {ENABLE_AI_DRAFT && (
+              <button className="primary-button" onClick={generateDraft} disabled={isDraftGenerating}>
+                <RefreshCcw size={18} />
+                {isDraftGenerating ? "AI生成中" : "生成初稿"}
+              </button>
+            )}
           </div>
 
           <textarea
@@ -239,14 +245,16 @@ export function App() {
             value={sourceText}
             onChange={(event) => {
               setSourceText(event.target.value);
-              setDraftError(null);
-              setDraftNotice(null);
+              if (ENABLE_AI_DRAFT) {
+                setDraftError(null);
+                setDraftNotice(null);
+              }
             }}
             aria-label="文章正文"
           />
 
-          {draftNotice && <div className="draft-notice">{draftNotice}</div>}
-          {draftError && <div className="draft-error">{draftError}</div>}
+          {ENABLE_AI_DRAFT && draftNotice && <div className="draft-notice">{draftNotice}</div>}
+          {ENABLE_AI_DRAFT && draftError && <div className="draft-error">{draftError}</div>}
 
           <StyleSettingsPanel settings={styleSettings} cardStyle={cardStyle} onChange={updateStyleSettings} />
 

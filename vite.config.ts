@@ -6,10 +6,15 @@ declare const process: {
 };
 
 function getBasePath() {
-  const repositoryName = process.env.GITHUB_REPOSITORY?.split("/")[1];
-  if (!repositoryName || repositoryName.endsWith(".github.io")) return "/";
+  const configuredBasePath = process.env.VITE_BASE_PATH?.trim();
+  if (!configuredBasePath) return "/";
+  if (/^https?:\/\//.test(configuredBasePath)) {
+    return configuredBasePath.endsWith("/") ? configuredBasePath : `${configuredBasePath}/`;
+  }
 
-  return `/${repositoryName}/`;
+  if (configuredBasePath === "/") return "/";
+
+  return `/${configuredBasePath.replace(/^\/+|\/+$/g, "")}/`;
 }
 
 export default defineConfig({
