@@ -48,8 +48,6 @@ const infoBlockForcedMaxLength = 86;
 const infoBlockMaxUnits = 2;
 const longSentenceSplitLength = 78;
 const orphanInfoBlockMaxLength = 6;
-const implicitSectionMinParagraphs = 3;
-const implicitSectionMinChars = 150;
 const maxInlineColorLength = 60;
 const minInlineColorLength = 6;
 const maxInlineColorRatio = 0.86;
@@ -87,23 +85,10 @@ export function createBlocksFromText(input: string): ContentBlock[] {
 
   const blocks: ContentBlock[] = [];
   let hasTitle = false;
-  let sectionParagraphCount = 0;
-  let sectionTextLength = 0;
-  const hasExplicitSections = lines.some((line, index) => {
-    if (index === 0 || markdownDividerPattern.test(line.text)) return false;
-    const markdownHeading = getMarkdownHeading(line.text);
-    return Boolean((markdownHeading && markdownHeading.level > 1) || isSubheadingLike(line));
-  });
-
-  const resetSectionStats = () => {
-    sectionParagraphCount = 0;
-    sectionTextLength = 0;
-  };
 
   lines.forEach((line, index) => {
     if (markdownDividerPattern.test(line.text)) {
       addDividerIfNeeded(blocks);
-      resetSectionStats();
       return;
     }
 
@@ -113,14 +98,12 @@ export function createBlocksFromText(input: string): ContentBlock[] {
         if (hasTitle) addDividerIfNeeded(blocks);
         blocks.push(makeBlock(hasTitle ? "h2" : "h1", markdownHeading.text));
         hasTitle = true;
-        resetSectionStats();
         return;
       }
 
       addDividerAfterTitleIfNeeded(blocks);
       addDividerIfNeeded(blocks);
       blocks.push(makeBlock(markdownHeading.level === 2 ? "h2" : "h3", markdownHeading.text));
-      resetSectionStats();
       return;
     }
 
@@ -130,7 +113,6 @@ export function createBlocksFromText(input: string): ContentBlock[] {
     if (isTitle) {
       blocks.push(makeBlock("h1", cleanPrefix(line.text)));
       hasTitle = true;
-      resetSectionStats();
       return;
     }
 
@@ -139,28 +121,11 @@ export function createBlocksFromText(input: string): ContentBlock[] {
     if (isHeading) {
       addDividerIfNeeded(blocks);
       blocks.push(makeBlock("h2", cleanPrefix(line.text)));
-      resetSectionStats();
       return;
     }
 
-    splitIntoInfoBlocks(line.text).forEach((paragraph, paragraphIndex) => {
-      if (
-        shouldStartImplicitSection(
-          blocks,
-          hasExplicitSections,
-          line,
-          paragraphIndex,
-          sectionParagraphCount,
-          sectionTextLength,
-        )
-      ) {
-        addDividerIfNeeded(blocks);
-        resetSectionStats();
-      }
-
+    splitIntoInfoBlocks(line.text).forEach((paragraph) => {
       blocks.push(makeBlock("p", paragraph, false, false, createRuleBasedSegments(paragraph, "p")));
-      sectionParagraphCount += 1;
-      sectionTextLength += getComparableTextLength(paragraph);
     });
   });
 
@@ -272,8 +237,7 @@ function isTitleLike(line: string): boolean {
 
 function getTextLines(input: string): TextLine[] {
   const rawLines = input.replace(/\r\n/g, "\n").split("\n").map((line) => line.trim());
-
-  return rawLines.reduce<TextLine[]>((result, text, index) => {
+  const nonEmptyLines = rawLines.reduce<TextLine[]>((result, text, index) => {
     if (!text) return result;
 
     result.push({
@@ -285,6 +249,60 @@ function getTextLines(input: string): TextLine[] {
 
     return result;
   }, []);
+
+  const lines: TextLine[] = [];
+  let paragraphLines: TextLine[] = [];
+
+  const pushLine = (line: Omit<TextLine, "nonEmptyIndex">) => {
+    lines.push({ ...line, nonEmptyIndex: lines.length });
+  };
+
+  const flushParagraph = () => {
+    if (!paragraphLines.length) return;
+
+    const firstLine = paragraphLines[0];
+    const lastLine = paragraphLines[paragraphLines.length - 1];
+    pushLine({
+      text: joinSoftWrappedLines(paragraphLines.map((line) => line.text)),
+      hasBlankBefore: firstLine.hasBlankBefore,
+      hasBlankAfter: lastLine.hasBlankAfter,
+    });
+    paragraphLines = [];
+  };
+
+  nonEmptyLines.forEach((line) => {
+    const isFirstEffectiveLine = lines.length === 0 && paragraphLines.length === 0;
+    const shouldKeepAsOwnLine =
+      isFirstEffectiveLine ||
+      markdownDividerPattern.test(line.text) ||
+      Boolean(getMarkdownHeading(line.text)) ||
+      isSubheadingLike(line);
+
+    if (shouldKeepAsOwnLine) {
+      flushParagraph();
+      pushLine(line);
+      return;
+    }
+
+    paragraphLines.push(line);
+    if (line.hasBlankAfter) flushParagraph();
+  });
+
+  flushParagraph();
+
+  return lines;
+}
+
+function joinSoftWrappedLines(lines: string[]) {
+  return lines.reduce((result, line) => {
+    if (!result) return line;
+
+    const previousChar = result[result.length - 1] ?? "";
+    const nextChar = line[0] ?? "";
+    const needsSpace = /[A-Za-z0-9)]/.test(previousChar) && /[A-Za-z0-9(]/.test(nextChar);
+
+    return `${result}${needsSpace ? " " : ""}${line}`;
+  }, "");
 }
 
 function isSubheadingLike(line: TextLine): boolean {
@@ -417,24 +435,6 @@ function trimTextRange(text: string, start: number, end: number): TextRange[] {
   while (nextEnd > nextStart && /\s/.test(text[nextEnd - 1])) nextEnd -= 1;
 
   return nextStart < nextEnd ? [{ start: nextStart, end: nextEnd }] : [];
-}
-
-function shouldStartImplicitSection(
-  blocks: ContentBlock[],
-  hasExplicitSections: boolean,
-  line: TextLine,
-  paragraphIndex: number,
-  sectionParagraphCount: number,
-  sectionTextLength: number,
-) {
-  if (hasExplicitSections) return false;
-  if (sectionParagraphCount === 0) return false;
-  if (blocks[blocks.length - 1]?.type === "hr") return false;
-
-  const isSourceParagraphBoundary = paragraphIndex === 0 && line.hasBlankBefore;
-  if (isSourceParagraphBoundary && sectionParagraphCount >= 2) return true;
-
-  return sectionParagraphCount >= implicitSectionMinParagraphs || sectionTextLength >= implicitSectionMinChars;
 }
 
 function chooseBestIndexExcept(
