@@ -38,6 +38,20 @@ describe("createBlocksFromText", () => {
     expect(paragraphText(blocks)).toContain("第五句收束这个自然段");
   });
 
+  test("adds gentle dividers between body sections when there are no explicit subheadings", () => {
+    const blocks = createBlocksFromText(`日常观察
+
+第一段铺垫背景，先把事情的来龙去脉讲清楚。
+
+第二段继续补充前面的情绪和场景，仍然属于开头板块。
+
+第三段开始切换到解决做法，读者需要看到新的板块节奏。
+
+第四段继续补充这个做法，和第三段放在同一个板块里。`);
+
+    expect(types(blocks)).toEqual(["h1", "hr", "p", "p", "hr", "p", "p"]);
+  });
+
   test("treats consecutive non-empty soft-wrapped lines as one natural paragraph", () => {
     const blocks = createBlocksFromText(`日常观察
 家长晚上发来一大段消息，
