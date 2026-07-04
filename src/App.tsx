@@ -15,6 +15,7 @@ import {
   Underline,
 } from "lucide-react";
 import { exportPagesToPng, measureBlocksForPng, type ExportedImage } from "./exportImage";
+import { downloadImage, downloadImagesSequentially, type DownloadProgress } from "./downloadImages";
 import { blocksToMarkdown, createBlocksFromText, IMAGE_CONFIG, makeBlock, sampleArticle } from "./formatter";
 import { paginateBlocks } from "./pagination";
 import {
@@ -39,6 +40,8 @@ export function App() {
   const [draftError, setDraftError] = useState<string | null>(null);
   const [draftNotice, setDraftNotice] = useState<string | null>(null);
   const [isDraftGenerating, setIsDraftGenerating] = useState(false);
+  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
   const [styleSettings, setStyleSettings] = useState<CardStyleSettings>(DEFAULT_CARD_STYLE);
   const previewRequestRef = useRef(0);
@@ -218,13 +221,18 @@ export function App() {
   }
 
   async function saveAllImages() {
-    if (await shareImages(images)) return;
+    if (!images.length || isDownloadingAll) return;
 
-    images.forEach((image, index) => {
-      window.setTimeout(() => {
-        downloadImage(image);
-      }, index * 180);
-    });
+    setIsDownloadingAll(true);
+    setDownloadProgress(null);
+
+    try {
+      if (canShareImages && (await shareImages(images))) return;
+      await downloadImagesSequentially(images, setDownloadProgress);
+    } finally {
+      setIsDownloadingAll(false);
+      window.setTimeout(() => setDownloadProgress(null), 1200);
+    }
   }
 
   async function saveImage(image: ExportedImage) {
@@ -394,9 +402,21 @@ export function App() {
                 <FileImage size={18} />
                 {isPreviewRendering ? "生成中" : "刷新预览"}
               </button>
-              <button className="secondary-button" onClick={saveAllImages} disabled={!images.length || isPreviewRendering}>
+              <button
+                className="secondary-button"
+                onClick={saveAllImages}
+                disabled={!images.length || isPreviewRendering || isDownloadingAll}
+              >
                 <ImageDown size={18} />
-                {canShareImages ? "保存全部" : "下载全部"}
+                {isDownloadingAll
+                  ? downloadProgress
+                    ? `下载中 ${downloadProgress.current}/${downloadProgress.total}`
+                    : canShareImages
+                      ? "保存中"
+                      : "准备中"
+                  : canShareImages
+                    ? "保存全部"
+                    : "下载全部"}
               </button>
             </div>
           </div>
@@ -523,14 +543,4 @@ async function shareImages(images: ExportedImage[]) {
     if (error instanceof DOMException && error.name === "AbortError") return true;
     return false;
   }
-}
-
-function downloadImage(image: ExportedImage) {
-  const anchor = document.createElement("a");
-  anchor.href = image.url;
-  anchor.download = image.name;
-  anchor.rel = "noopener";
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
 }
