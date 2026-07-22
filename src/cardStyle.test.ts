@@ -5,7 +5,7 @@ import {
   resolveCardStyle,
   type TextRoleStyle,
 } from "./cardStyle";
-import { measureBlocksForPng } from "./exportImage";
+import { getCenteredTextBaseline, measureBlocksForPng } from "./exportImage";
 import { paginateBlocks } from "./pagination";
 import type { ContentBlock, ThemeId } from "./types";
 
@@ -126,6 +126,19 @@ describe("card themes", () => {
       expect(assignedFonts.length).toBeGreaterThanOrEqual(blocks.length);
       expect(assignedFonts.every((assigned) => assigned.endsWith(font.canvasFamily))).toBe(true);
     });
+  });
+
+  test("centers heading glyphs inside their line box", () => {
+    const lineTop = 12;
+    const lineHeight = 30;
+    const ascent = 19;
+    const descent = 5;
+    const baseline = getCenteredTextBaseline(lineTop, lineHeight, ascent, descent);
+    const glyphTop = baseline - ascent;
+    const glyphBottom = baseline + descent;
+
+    expect((glyphTop + glyphBottom) / 2).toBe(lineTop + lineHeight / 2);
+    expect(glyphTop - lineTop).toBe((lineHeight - ascent - descent) / 2);
   });
 });
 

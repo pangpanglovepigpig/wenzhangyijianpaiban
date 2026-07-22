@@ -657,7 +657,8 @@ function getRoleStyle(block: ContentBlock, cardStyle: ResolvedCardStyle): TextRo
 function drawWrappedText(ctx: CanvasRenderingContext2D, block: ContentBlock, options: DrawTextOptions) {
   ctx.font = options.font;
   ctx.fillStyle = options.color;
-  ctx.textBaseline = "top";
+  const verticallyCenterText = isHeadingBlock(options.blockType);
+  ctx.textBaseline = verticallyCenterText ? "alphabetic" : "top";
 
   const box = getTextBox(options);
   const textX = box.x + options.roleStyle.borderLeftWidth + options.roleStyle.paddingLeft;
@@ -709,7 +710,10 @@ function drawWrappedText(ctx: CanvasRenderingContext2D, block: ContentBlock, opt
   }
 
   lines.forEach((line, index) => {
-    const lineY = textY + index * options.lineHeight;
+    const lineTop = textY + index * options.lineHeight;
+    const lineY = verticallyCenterText
+      ? getCenteredHeadingBaseline(ctx, line, lineTop, options)
+      : lineTop;
     const lineWidth = Math.min(line.width, textMaxWidth);
     const lineX = box.align === "center" ? textX + (textMaxWidth - lineWidth) / 2 : textX;
     drawRichLine(ctx, line, lineX, lineY, options);
@@ -717,7 +721,7 @@ function drawWrappedText(ctx: CanvasRenderingContext2D, block: ContentBlock, opt
       drawWavyUnderline(
         ctx,
         lineX,
-        lineY + options.lineHeight - options.underlineOffset,
+        lineTop + options.lineHeight - options.underlineOffset,
         lineWidth,
         options.underlineColor,
         options.underlineThickness,
@@ -725,9 +729,63 @@ function drawWrappedText(ctx: CanvasRenderingContext2D, block: ContentBlock, opt
     }
   });
 
+  ctx.textBaseline = "top";
+
   drawAfterTextDecoration(ctx, options, box.x, box.width, textBoxHeight);
 
   return totalHeight;
+}
+
+function isHeadingBlock(blockType: ContentBlock["type"]) {
+  return blockType === "h1" || blockType === "h2" || blockType === "h3";
+}
+
+function getCenteredHeadingBaseline(
+  ctx: CanvasRenderingContext2D,
+  line: RichLine,
+  lineTop: number,
+  options: DrawTextOptions,
+) {
+  let ascent = 0;
+  let descent = 0;
+  let hasUsableMetrics = false;
+
+  line.runs.forEach((run) => {
+    ctx.font = getRunFont(run, options);
+    const metrics = ctx.measureText(run.text || "国");
+    const runAscent = metrics.actualBoundingBoxAscent;
+    const runDescent = metrics.actualBoundingBoxDescent;
+
+    if (
+      Number.isFinite(runAscent) &&
+      Number.isFinite(runDescent) &&
+      runAscent >= 0 &&
+      runDescent >= 0 &&
+      runAscent + runDescent > 0
+    ) {
+      ascent = Math.max(ascent, runAscent);
+      descent = Math.max(descent, runDescent);
+      hasUsableMetrics = true;
+    }
+  });
+
+  if (!hasUsableMetrics) {
+    ascent = options.fontSize * 0.82;
+    descent = options.fontSize * 0.18;
+  }
+
+  return getCenteredTextBaseline(lineTop, options.lineHeight, ascent, descent);
+}
+
+export function getCenteredTextBaseline(
+  lineTop: number,
+  lineHeight: number,
+  ascent: number,
+  descent: number,
+) {
+  const safeAscent = Math.max(0, ascent);
+  const safeDescent = Math.max(0, descent);
+  return lineTop + (lineHeight - safeAscent - safeDescent) / 2 + safeAscent;
 }
 
 function getHighlightRect(
