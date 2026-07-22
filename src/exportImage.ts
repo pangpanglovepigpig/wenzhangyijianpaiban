@@ -40,6 +40,20 @@ type RichLine = {
   width: number;
 };
 
+type ThemeId = ResolvedCardStyle["theme"]["id"];
+
+type TextBox = {
+  x: number;
+  width: number;
+  radius: number;
+  align: "left" | "center";
+};
+
+type ThemePainter = {
+  paintBackdrop: (ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) => void;
+  drawChrome: (ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) => void;
+};
+
 export type ExportedImage = {
   id: string;
   name: string;
@@ -128,50 +142,217 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
+const THEME_PAINTERS: Record<ThemeId, ThemePainter> = {
+  "apple-notes": { paintBackdrop: noopThemePaint, drawChrome: drawAppleChrome },
+  bytedance: { paintBackdrop: paintByteDanceBackdrop, drawChrome: drawByteDanceChrome },
+  alibaba: { paintBackdrop: paintAlibabaBackdrop, drawChrome: drawAlibabaChrome },
+  "turquoise-green": { paintBackdrop: paintTurquoiseBackdrop, drawChrome: drawTurquoiseChrome },
+  "rouge-red": { paintBackdrop: paintRougeBackdrop, drawChrome: drawRougeChrome },
+  "taro-purple": { paintBackdrop: paintTaroBackdrop, drawChrome: drawTaroChrome },
+  "ink-scroll": { paintBackdrop: paintInkBackdrop, drawChrome: drawInkChrome },
+  "cream-coffee": { paintBackdrop: paintCreamBackdrop, drawChrome: drawCreamChrome },
+};
+
 function paintBackground(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
   ctx.fillStyle = cardStyle.theme.pageBackground;
   ctx.fillRect(0, 0, cardStyle.width, cardStyle.height);
+  THEME_PAINTERS[cardStyle.theme.id].paintBackdrop(ctx, cardStyle);
+}
 
-  if (cardStyle.theme.id === "bytedance") {
-    const gradient = ctx.createLinearGradient(0, 0, cardStyle.width, 0);
-    gradient.addColorStop(0, "#1677ff");
-    gradient.addColorStop(0.5, "#7662d6");
-    gradient.addColorStop(1, "#ff2b21");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, cardStyle.width, 8);
+function drawThemeChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  THEME_PAINTERS[cardStyle.theme.id].drawChrome(ctx, cardStyle);
+}
 
-    ctx.fillStyle = "#eef3ff";
-    roundRect(ctx, cardStyle.width - 56, 32, 36, 36, 18);
+function noopThemePaint() {}
+
+function paintByteDanceBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  const gradient = ctx.createLinearGradient(0, 0, cardStyle.width, 0);
+  gradient.addColorStop(0, "#1677ff");
+  gradient.addColorStop(0.5, "#7662d6");
+  gradient.addColorStop(1, "#ff2b21");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, cardStyle.width, 8);
+
+  ctx.fillStyle = "#eef3ff";
+  roundRect(ctx, cardStyle.width - 56, 32, 36, 36, 18);
+  ctx.fill();
+  drawFooterBand(ctx, cardStyle, "#ffffff");
+}
+
+function paintAlibabaBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  const gradient = ctx.createLinearGradient(0, 0, cardStyle.width, 0);
+  gradient.addColorStop(0, "#ff6a00");
+  gradient.addColorStop(1, "#ff8b2d");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, cardStyle.width, 8);
+
+  [
+    { x: cardStyle.width - 30, y: 72, radius: 39, color: "rgba(255, 106, 0, 0.08)" },
+    { x: cardStyle.width - 1, y: 100, radius: 31, color: "rgba(255, 106, 0, 0.05)" },
+    { x: cardStyle.width - 48, y: 114, radius: 17, color: "rgba(255, 106, 0, 0.09)" },
+  ].forEach(({ x, y, radius, color }) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fill();
+  });
 
-    drawFooterBand(ctx, cardStyle, "#ffffff");
+  drawAlibabaArc(ctx, cardStyle);
+  drawFooterBand(ctx, cardStyle, "#fffdfb");
+  ctx.fillStyle = "rgba(255, 106, 0, 0.12)";
+  ctx.fillRect(0, cardStyle.height - 10, cardStyle.width, 10);
+}
+
+function paintTurquoiseBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  ctx.fillStyle = "rgba(65, 191, 167, 0.12)";
+  ctx.beginPath();
+  ctx.arc(cardStyle.width + 6, -10, 92, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(65, 191, 167, 0.08)";
+  ctx.beginPath();
+  ctx.arc(cardStyle.width + 6, -10, 64, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(65, 191, 167, 0.1)";
+  ctx.beginPath();
+  ctx.arc(-18, cardStyle.height + 14, 105, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(23, 107, 91, 0.18)";
+  ctx.lineWidth = 1.2;
+  [72, 90, 108].forEach((radius) => {
+    ctx.beginPath();
+    ctx.arc(cardStyle.width + 16, cardStyle.height + 8, radius, Math.PI, Math.PI * 1.5);
+    ctx.stroke();
+  });
+  drawDotGrid(ctx, cardStyle.width - 68, 21, 4, 4, 11, "rgba(23, 107, 91, 0.42)");
+  ctx.restore();
+}
+
+function paintRougeBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(216, 58, 86, 0.06)";
+  ctx.lineWidth = 1;
+  for (let x = 36; x < cardStyle.width; x += 72) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, cardStyle.height);
+    ctx.stroke();
   }
-
-  if (cardStyle.theme.id === "alibaba") {
-    const gradient = ctx.createLinearGradient(0, 0, cardStyle.width, 0);
-    gradient.addColorStop(0, "#ff6a00");
-    gradient.addColorStop(1, "#ff8b2d");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, cardStyle.width, 8);
-
-    ctx.fillStyle = "rgba(255, 106, 0, 0.08)";
+  for (let y = 42; y < cardStyle.height; y += 72) {
     ctx.beginPath();
-    ctx.arc(cardStyle.width - 30, 72, 39, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255, 106, 0, 0.05)";
-    ctx.beginPath();
-    ctx.arc(cardStyle.width - 1, 100, 31, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255, 106, 0, 0.09)";
-    ctx.beginPath();
-    ctx.arc(cardStyle.width - 48, 114, 17, 0, Math.PI * 2);
-    ctx.fill();
-
-    drawAlibabaArc(ctx, cardStyle);
-    drawFooterBand(ctx, cardStyle, "#fffdfb");
-    ctx.fillStyle = "rgba(255, 106, 0, 0.12)";
-    ctx.fillRect(0, cardStyle.height - 10, cardStyle.width, 10);
+    ctx.moveTo(0, y);
+    ctx.lineTo(cardStyle.width, y);
+    ctx.stroke();
   }
+  ctx.fillStyle = "rgba(242, 107, 107, 0.14)";
+  ctx.beginPath();
+  ctx.arc(cardStyle.width + 10, 18, 78, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(216, 58, 86, 0.08)";
+  ctx.beginPath();
+  ctx.arc(cardStyle.width - 18, -4, 48, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(242, 107, 107, 0.12)";
+  ctx.beginPath();
+  ctx.arc(-10, cardStyle.height + 8, 82, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function paintTaroBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  const gradient = ctx.createLinearGradient(0, 0, cardStyle.width, cardStyle.height);
+  gradient.addColorStop(0, "#fffefe");
+  gradient.addColorStop(0.58, "#fbf8ff");
+  gradient.addColorStop(1, "#f1e9ff");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, cardStyle.width, cardStyle.height);
+
+  ctx.save();
+  ctx.fillStyle = "rgba(154, 123, 209, 0.13)";
+  ctx.beginPath();
+  ctx.ellipse(cardStyle.width - 26, 20, 88, 54, -0.35, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(184, 155, 232, 0.16)";
+  ctx.beginPath();
+  ctx.ellipse(34, cardStyle.height - 16, 105, 64, 0.35, 0, Math.PI * 2);
+  ctx.fill();
+  drawDotGrid(ctx, 18, 26, 3, 3, 10, "rgba(108, 77, 178, 0.22)");
+  ctx.strokeStyle = "rgba(108, 77, 178, 0.34)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cardStyle.width - 112, 24);
+  ctx.lineTo(cardStyle.width - 82, 15);
+  ctx.lineTo(cardStyle.width - 54, 29);
+  ctx.lineTo(cardStyle.width - 28, 13);
+  ctx.stroke();
+  [
+    [cardStyle.width - 112, 24],
+    [cardStyle.width - 82, 15],
+    [cardStyle.width - 54, 29],
+    [cardStyle.width - 28, 13],
+  ].forEach(([x, y]) => {
+    ctx.fillStyle = "#9a7bd1";
+    ctx.beginPath();
+    ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+function paintInkBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  ctx.fillStyle = "rgba(47, 124, 117, 0.075)";
+  [
+    [cardStyle.width - 52, 45, 58, 22],
+    [cardStyle.width - 12, 58, 48, 18],
+    [54, cardStyle.height - 45, 68, 24],
+    [8, cardStyle.height - 25, 48, 18],
+  ].forEach(([x, y, rx, ry]) => {
+    ctx.beginPath();
+    ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.strokeStyle = "rgba(96, 91, 74, 0.08)";
+  ctx.lineWidth = 0.7;
+  [
+    [48, 86, 63, 82],
+    [136, 32, 151, 35],
+    [252, 104, 268, 99],
+    [342, 186, 359, 181],
+    [89, 348, 104, 345],
+    [210, 514, 228, 510],
+    [319, 441, 337, 445],
+  ].forEach(([x1, y1, x2, y2]) => {
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  });
+  ctx.restore();
+}
+
+function paintCreamBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  const gradient = ctx.createLinearGradient(0, 0, cardStyle.width, cardStyle.height);
+  gradient.addColorStop(0, "#fffdf7");
+  gradient.addColorStop(1, "#fff4e6");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, cardStyle.width, cardStyle.height);
+
+  ctx.save();
+  ctx.fillStyle = "rgba(201, 134, 79, 0.11)";
+  ctx.beginPath();
+  ctx.arc(cardStyle.width + 10, -10, 94, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(184, 111, 54, 0.18)";
+  ctx.lineWidth = 1.1;
+  [65, 82, 99].forEach((radius) => {
+    ctx.beginPath();
+    ctx.arc(-12, cardStyle.height + 4, radius, Math.PI * 1.5, Math.PI * 2);
+    ctx.stroke();
+  });
+  ctx.fillStyle = "rgba(201, 134, 79, 0.08)";
+  ctx.fillRect(0, 0, 10, cardStyle.height);
+  ctx.restore();
 }
 
 function drawFooterBand(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle, color: string) {
@@ -192,18 +373,157 @@ function drawAlibabaArc(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardSt
   ctx.restore();
 }
 
-function drawThemeChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
-  if (cardStyle.theme.id === "apple-notes") {
-    drawAppleChrome(ctx, cardStyle);
-    return;
-  }
+function drawTurquoiseChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(23, 107, 91, 0.28)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cardStyle.width / 2 - 38, cardStyle.height - 20);
+  ctx.lineTo(cardStyle.width / 2 - 10, cardStyle.height - 20);
+  ctx.moveTo(cardStyle.width / 2 + 10, cardStyle.height - 20);
+  ctx.lineTo(cardStyle.width / 2 + 38, cardStyle.height - 20);
+  ctx.stroke();
+  [-5, 0, 5].forEach((offset) => {
+    ctx.fillStyle = offset === 0 ? "#176b5b" : "#69cdb9";
+    ctx.beginPath();
+    ctx.arc(cardStyle.width / 2 + offset * 2, cardStyle.height - 20, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
 
-  if (cardStyle.theme.id === "bytedance") {
-    drawByteDanceChrome(ctx, cardStyle);
-    return;
-  }
+function drawRougeChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(216, 58, 86, 0.34)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(68, cardStyle.height - 20);
+  ctx.lineTo(cardStyle.width / 2 - 26, cardStyle.height - 20);
+  ctx.moveTo(cardStyle.width / 2 + 26, cardStyle.height - 20);
+  ctx.lineTo(cardStyle.width - 68, cardStyle.height - 20);
+  ctx.stroke();
+  [-12, 0, 12].forEach((offset) => {
+    ctx.fillStyle = offset === 0 ? "#d83a56" : "#f3a0af";
+    ctx.beginPath();
+    ctx.arc(cardStyle.width / 2 + offset, cardStyle.height - 20, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
 
-  drawAlibabaChrome(ctx, cardStyle);
+function drawTaroChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(108, 77, 178, 0.32)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cardStyle.width / 2 - 48, cardStyle.height - 20);
+  ctx.lineTo(cardStyle.width / 2 - 12, cardStyle.height - 20);
+  ctx.moveTo(cardStyle.width / 2 + 12, cardStyle.height - 20);
+  ctx.lineTo(cardStyle.width / 2 + 48, cardStyle.height - 20);
+  ctx.stroke();
+  drawFourPointStar(ctx, cardStyle.width / 2, cardStyle.height - 20, 5, "#6c4db2");
+  ctx.restore();
+}
+
+function drawInkChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(22, 78, 74, 0.62)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(13, 13, cardStyle.width - 26, cardStyle.height - 26);
+  ctx.strokeStyle = "rgba(22, 78, 74, 0.28)";
+  ctx.strokeRect(17, 17, cardStyle.width - 34, cardStyle.height - 34);
+  ctx.strokeStyle = "#c9483b";
+  ctx.lineWidth = 1.4;
+  ctx.strokeRect(cardStyle.width - 54, cardStyle.height - 54, 24, 24);
+  ctx.strokeRect(cardStyle.width - 51, cardStyle.height - 51, 18, 18);
+  ctx.fillStyle = "#2f7c75";
+  [-8, 0, 8].forEach((offset) => {
+    ctx.beginPath();
+    ctx.arc(cardStyle.width / 2 + offset, cardStyle.height - 20, offset === 0 ? 2.5 : 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawCreamChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  ctx.fillStyle = "#c9864f";
+  ctx.beginPath();
+  ctx.moveTo(14, 0);
+  ctx.lineTo(42, 0);
+  ctx.lineTo(42, 38);
+  ctx.lineTo(34, 46);
+  ctx.lineTo(14, 46);
+  ctx.closePath();
+  ctx.fill();
+  drawFourPointStar(ctx, 28, 18, 4.5, "#fff9ef");
+  ctx.strokeStyle = "rgba(184, 111, 54, 0.5)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(72, cardStyle.height - 20);
+  ctx.lineTo(cardStyle.width / 2 - 18, cardStyle.height - 20);
+  ctx.moveTo(cardStyle.width / 2 + 18, cardStyle.height - 20);
+  ctx.lineTo(cardStyle.width - 72, cardStyle.height - 20);
+  ctx.stroke();
+  drawFourPointStar(ctx, cardStyle.width / 2, cardStyle.height - 20, 4.5, "#b86f36");
+  ctx.restore();
+}
+
+function drawDotGrid(
+  ctx: CanvasRenderingContext2D,
+  startX: number,
+  startY: number,
+  columns: number,
+  rows: number,
+  gap: number,
+  color: string,
+) {
+  ctx.fillStyle = color;
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      ctx.beginPath();
+      ctx.arc(startX + column * gap, startY + row * gap, 1.45, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawFourPointStar(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, y - radius);
+  ctx.lineTo(x + radius * 0.28, y - radius * 0.28);
+  ctx.lineTo(x + radius, y);
+  ctx.lineTo(x + radius * 0.28, y + radius * 0.28);
+  ctx.lineTo(x, y + radius);
+  ctx.lineTo(x - radius * 0.28, y + radius * 0.28);
+  ctx.lineTo(x - radius, y);
+  ctx.lineTo(x - radius * 0.28, y - radius * 0.28);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawDiamond(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, y - radius);
+  ctx.lineTo(x + radius, y);
+  ctx.lineTo(x, y + radius);
+  ctx.lineTo(x - radius, y);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function drawAppleChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
@@ -354,24 +674,8 @@ function drawWrappedText(ctx: CanvasRenderingContext2D, block: ContentBlock, opt
   const afterHeight = getAfterDecorationHeight(options);
   const totalHeight = textBoxHeight + afterHeight;
 
-  if (options.roleStyle.backgroundColor !== "transparent") {
-    ctx.fillStyle = getRoleBackground(ctx, options, box.x, box.width);
-    if (box.radius > 0) {
-      roundRect(ctx, box.x, options.y, box.width, textBoxHeight, box.radius);
-      ctx.fill();
-    } else {
-      ctx.fillRect(box.x, options.y, box.width, textBoxHeight);
-    }
-  }
-
-  if (options.themeId === "bytedance" && options.blockType === "h3") {
-    ctx.strokeStyle = "#d9e8ff";
-    ctx.lineWidth = 1;
-    roundRect(ctx, box.x, options.y, box.width, textBoxHeight, 5);
-    ctx.stroke();
-    ctx.fillStyle = "rgba(9, 201, 213, 0.45)";
-    ctx.fillRect(box.x + box.width - 7, options.y + textBoxHeight - 7, 7, 7);
-  }
+  drawTextBoxBackground(ctx, options, box, textBoxHeight);
+  drawTextBoxFrame(ctx, options, box, textBoxHeight);
 
   if (options.roleStyle.borderLeftWidth > 0) {
     ctx.fillStyle = options.roleStyle.borderLeftColor;
@@ -476,7 +780,358 @@ function measureWrappedText(ctx: CanvasRenderingContext2D, block: ContentBlock, 
   return textBoxHeight + getAfterDecorationHeight(options);
 }
 
-function getTextBox(options: DrawTextOptions) {
+function drawTextBoxBackground(
+  ctx: CanvasRenderingContext2D,
+  options: DrawTextOptions,
+  box: TextBox,
+  height: number,
+) {
+  if (drawCustomTextBoxBackground(ctx, options, box, height)) return;
+  if (options.roleStyle.backgroundColor === "transparent") return;
+
+  ctx.fillStyle = getRoleBackground(ctx, options, box.x, box.width);
+  if (box.radius > 0) {
+    roundRect(ctx, box.x, options.y, box.width, height, box.radius);
+    ctx.fill();
+  } else {
+    ctx.fillRect(box.x, options.y, box.width, height);
+  }
+}
+
+function drawCustomTextBoxBackground(
+  ctx: CanvasRenderingContext2D,
+  options: DrawTextOptions,
+  box: TextBox,
+  height: number,
+) {
+  const y = options.y;
+
+  if (options.themeId === "turquoise-green") {
+    if (options.blockType === "h2") {
+      const gradient = ctx.createLinearGradient(box.x, 0, box.x + box.width, 0);
+      gradient.addColorStop(0, "#176b5b");
+      gradient.addColorStop(0.78, "#176b5b");
+      gradient.addColorStop(1, "#41bfa7");
+      ctx.fillStyle = gradient;
+      roundRect(ctx, box.x, y, box.width, height, 999);
+      ctx.fill();
+      return true;
+    }
+    if (options.blockType === "h3") {
+      ctx.fillStyle = "#effaf7";
+      roundRect(ctx, box.x, y, box.width, height, 9);
+      ctx.fill();
+      return true;
+    }
+  }
+
+  if (options.themeId === "rouge-red") {
+    if (options.blockType === "h2") {
+      const fold = Math.min(34, height * 0.78);
+      const gradient = ctx.createLinearGradient(box.x, 0, box.x + box.width, 0);
+      gradient.addColorStop(0, "#d83a56");
+      gradient.addColorStop(1, "#ef6677");
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.moveTo(box.x, y);
+      ctx.lineTo(box.x + box.width - fold, y);
+      ctx.lineTo(box.x + box.width, y + height / 2);
+      ctx.lineTo(box.x + box.width - fold, y + height);
+      ctx.lineTo(box.x, y + height);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "rgba(126, 24, 51, 0.42)";
+      ctx.beginPath();
+      ctx.moveTo(box.x + box.width - fold, y);
+      ctx.lineTo(box.x + box.width - 7, y + height / 2);
+      ctx.lineTo(box.x + box.width - fold, y + height * 0.72);
+      ctx.closePath();
+      ctx.fill();
+      return true;
+    }
+    if (options.blockType === "h3") {
+      ctx.fillStyle = "rgba(255, 241, 243, 0.92)";
+      roundRect(ctx, box.x, y, box.width, height, 9);
+      ctx.fill();
+      return true;
+    }
+  }
+
+  if (options.themeId === "taro-purple") {
+    if (options.blockType === "h1") {
+      ctx.save();
+      ctx.shadowColor = "rgba(86, 55, 132, 0.13)";
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetY = 4;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+      roundRect(ctx, box.x, y, box.width, height, 10);
+      ctx.fill();
+      ctx.restore();
+      return true;
+    }
+    if (options.blockType === "h2") return true;
+    if (options.blockType === "h3") {
+      const left = box.x + 12;
+      const right = box.x + box.width - 12;
+      ctx.fillStyle = "rgba(222, 208, 247, 0.7)";
+      ctx.beginPath();
+      ctx.moveTo(left, y + height * 0.3);
+      ctx.lineTo(left + 48, y + height * 0.14);
+      ctx.lineTo(right - 38, y + height * 0.23);
+      ctx.lineTo(right, y + height * 0.42);
+      ctx.lineTo(right - 25, y + height * 0.72);
+      ctx.lineTo(left + 36, y + height * 0.84);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "rgba(184, 155, 232, 0.22)";
+      ctx.fillRect(left + 10, y + height * 0.2, box.width - 42, height * 0.64);
+      return true;
+    }
+  }
+
+  if (options.themeId === "ink-scroll") {
+    if (options.blockType === "h2") return true;
+    if (options.blockType === "h3") {
+      ctx.fillStyle = "rgba(226, 239, 234, 0.88)";
+      ctx.beginPath();
+      ctx.moveTo(box.x + 10, y + 2);
+      ctx.lineTo(box.x + box.width - 8, y + 5);
+      ctx.lineTo(box.x + box.width, y + height - 4);
+      ctx.lineTo(box.x + 24, y + height);
+      ctx.lineTo(box.x, y + height - 8);
+      ctx.closePath();
+      ctx.fill();
+      return true;
+    }
+  }
+
+  if (options.themeId === "cream-coffee") {
+    if (options.blockType === "h2") {
+      const radius = Math.min(18, height / 2);
+      const gradient = ctx.createLinearGradient(box.x, 0, box.x + box.width, 0);
+      gradient.addColorStop(0, "#b86f36");
+      gradient.addColorStop(1, "#d39a66");
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.moveTo(box.x + 10, y);
+      ctx.lineTo(box.x + box.width - radius, y);
+      ctx.quadraticCurveTo(box.x + box.width, y, box.x + box.width, y + radius);
+      ctx.lineTo(box.x + box.width, y + height - radius);
+      ctx.quadraticCurveTo(
+        box.x + box.width,
+        y + height,
+        box.x + box.width - radius,
+        y + height,
+      );
+      ctx.lineTo(box.x + 10, y + height);
+      ctx.lineTo(box.x, y + height - 10);
+      ctx.lineTo(box.x, y + 10);
+      ctx.closePath();
+      ctx.fill();
+      return true;
+    }
+    if (options.blockType === "h3") {
+      ctx.fillStyle = "rgba(245, 233, 217, 0.94)";
+      ctx.beginPath();
+      ctx.moveTo(box.x, y);
+      ctx.lineTo(box.x + box.width - 16, y);
+      ctx.lineTo(box.x + box.width, y + 16);
+      ctx.lineTo(box.x + box.width, y + height);
+      ctx.lineTo(box.x, y + height);
+      ctx.closePath();
+      ctx.fill();
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function drawTextBoxFrame(
+  ctx: CanvasRenderingContext2D,
+  options: DrawTextOptions,
+  box: TextBox,
+  height: number,
+) {
+  const y = options.y;
+
+  if (options.themeId === "bytedance" && options.blockType === "h3") {
+    ctx.strokeStyle = "#d9e8ff";
+    ctx.lineWidth = 1;
+    roundRect(ctx, box.x, y, box.width, height, 5);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(9, 201, 213, 0.45)";
+    ctx.fillRect(box.x + box.width - 7, y + height - 7, 7, 7);
+    return;
+  }
+
+  if (options.themeId === "turquoise-green") {
+    if (options.blockType === "h1") {
+      const markerHeight = Math.min(36, Math.max(28, height - 4));
+      ctx.fillStyle = "#176b5b";
+      ctx.beginPath();
+      ctx.moveTo(box.x + 2, y + 2);
+      ctx.lineTo(box.x + 27, y + 2);
+      ctx.lineTo(box.x + 27, y + markerHeight);
+      ctx.lineTo(box.x + 14.5, y + markerHeight - 9);
+      ctx.lineTo(box.x + 2, y + markerHeight);
+      ctx.closePath();
+      ctx.fill();
+    }
+    if (options.blockType === "h2") {
+      drawDotGrid(ctx, box.x + box.width - 48, y + height / 2 - 7, 3, 2, 9, "rgba(255,255,255,0.82)");
+    }
+    if (options.blockType === "h3") {
+      ctx.fillStyle = "#176b5b";
+      roundRect(ctx, box.x, y + 4, 5, Math.max(8, height - 8), 2.5);
+      ctx.fill();
+      [box.x + box.width - 30, box.x + box.width - 18].forEach((dotX, index) => {
+        ctx.fillStyle = index === 0 ? "#13a88f" : "#79d5c1";
+        ctx.beginPath();
+        ctx.arc(dotX, y + height / 2, 3.6, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+    return;
+  }
+
+  if (options.themeId === "rouge-red") {
+    if (options.blockType === "h1") {
+      ctx.strokeStyle = "#d83a56";
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(box.x + 4, y + 30);
+      ctx.lineTo(box.x + 4, y + 3);
+      ctx.lineTo(box.x + 36, y + 3);
+      ctx.stroke();
+    }
+    if (options.blockType === "h3") {
+      ctx.strokeStyle = "rgba(216, 58, 86, 0.34)";
+      ctx.lineWidth = 1;
+      roundRect(ctx, box.x, y, box.width, height, 9);
+      ctx.stroke();
+      ctx.strokeStyle = "#d83a56";
+      ctx.lineWidth = 1.5;
+      [box.x + 12, box.x + 17].forEach((lineX) => {
+        ctx.beginPath();
+        ctx.moveTo(lineX, y + 7);
+        ctx.lineTo(lineX, y + height - 7);
+        ctx.stroke();
+      });
+      ctx.fillStyle = "#fff8f7";
+      ctx.beginPath();
+      ctx.arc(box.x + 25, y + height / 2, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#d83a56";
+      ctx.stroke();
+    }
+    return;
+  }
+
+  if (options.themeId === "taro-purple") {
+    if (options.blockType === "h1") {
+      ctx.strokeStyle = "rgba(108, 77, 178, 0.7)";
+      ctx.lineWidth = 1.2;
+      roundRect(ctx, box.x, y, box.width, height, 10);
+      ctx.stroke();
+    }
+    if (options.blockType === "h2") {
+      ctx.strokeStyle = "#8a64cf";
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, box.x, y, box.width, height, 10);
+      ctx.stroke();
+      ctx.fillStyle = "#6c4db2";
+      ctx.beginPath();
+      ctx.moveTo(box.x, y);
+      ctx.lineTo(box.x + 40, y);
+      ctx.lineTo(box.x + 50, y + height / 2);
+      ctx.lineTo(box.x + 40, y + height);
+      ctx.lineTo(box.x, y + height);
+      ctx.closePath();
+      ctx.fill();
+    }
+    if (options.blockType === "h3") {
+      ctx.strokeStyle = "#6c4db2";
+      ctx.lineWidth = 1.5;
+      const size = 11;
+      ctx.beginPath();
+      ctx.moveTo(box.x + 5, y + size + 3);
+      ctx.lineTo(box.x + 5, y + 3);
+      ctx.lineTo(box.x + size + 5, y + 3);
+      ctx.moveTo(box.x + box.width - size - 5, y + height - 3);
+      ctx.lineTo(box.x + box.width - 5, y + height - 3);
+      ctx.lineTo(box.x + box.width - 5, y + height - size - 3);
+      ctx.stroke();
+    }
+    return;
+  }
+
+  if (options.themeId === "ink-scroll") {
+    if (options.blockType === "h1") {
+      ctx.strokeStyle = "#164e4a";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(box.x + 42, y + 4);
+      ctx.lineTo(box.x + box.width, y + 4);
+      ctx.stroke();
+      ctx.strokeStyle = "#c9483b";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(box.x + 3, y + 3, 26, 26);
+    }
+    if (options.blockType === "h2") {
+      const centerY = y + height / 2;
+      ctx.strokeStyle = "rgba(22, 78, 74, 0.72)";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(box.x + 6, centerY);
+      ctx.lineTo(box.x + 72, centerY);
+      ctx.moveTo(box.x + box.width - 72, centerY);
+      ctx.lineTo(box.x + box.width - 6, centerY);
+      ctx.stroke();
+      drawDiamond(ctx, box.x + 6, centerY, 4, "#164e4a");
+      drawDiamond(ctx, box.x + box.width - 6, centerY, 4, "#164e4a");
+    }
+    if (options.blockType === "h3") {
+      ctx.fillStyle = "rgba(22, 78, 74, 0.72)";
+      ctx.fillRect(box.x + 4, y + 5, 6, Math.max(8, height - 10));
+      ctx.fillStyle = "#c9483b";
+      ctx.beginPath();
+      ctx.arc(box.x + 30, y + height / 2, 3.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    return;
+  }
+
+  if (options.themeId === "cream-coffee") {
+    if (options.blockType === "h2") {
+      drawFourPointStar(ctx, box.x + 25, y + height / 2, 4.5, "#fff9ef");
+    }
+    if (options.blockType === "h3") {
+      ctx.strokeStyle = "rgba(184, 111, 54, 0.42)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(box.x, y);
+      ctx.lineTo(box.x + box.width - 16, y);
+      ctx.lineTo(box.x + box.width, y + 16);
+      ctx.lineTo(box.x + box.width, y + height);
+      ctx.lineTo(box.x, y + height);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.strokeStyle = "#b86f36";
+      ctx.lineWidth = 1.4;
+      [box.x + 16, box.x + 21].forEach((lineX) => {
+        ctx.beginPath();
+        ctx.moveTo(lineX, y + 8);
+        ctx.lineTo(lineX, y + height - 14);
+        ctx.stroke();
+      });
+      ctx.fillStyle = "#b86f36";
+      ctx.fillRect(box.x + 14, y + height - 11, 9, 9);
+    }
+  }
+}
+
+function getTextBox(options: DrawTextOptions): TextBox {
   let x = options.x;
   let width = options.maxWidth;
   let radius = 0;
@@ -502,11 +1157,61 @@ function getTextBox(options: DrawTextOptions) {
     align = "center";
   }
 
+  if (options.themeId === "turquoise-green") {
+    if (options.blockType === "h2") radius = 999;
+    if (options.blockType === "h3") radius = 9;
+  }
+
+  if (options.themeId === "rouge-red") {
+    if (options.blockType === "h2" || options.blockType === "h3") {
+      x += 4;
+      width -= 8;
+    }
+    if (options.blockType === "h3") radius = 9;
+  }
+
+  if (options.themeId === "taro-purple") {
+    if (options.blockType === "h1" || options.blockType === "h2" || options.blockType === "h3") {
+      x += 6;
+      width -= 12;
+    }
+    if (options.blockType === "h1") align = "center";
+    if (options.blockType === "h1" || options.blockType === "h2") radius = 10;
+  }
+
+  if (options.themeId === "ink-scroll" && options.blockType === "h2") {
+    align = "center";
+  }
+
+  if (options.themeId === "cream-coffee") {
+    if (options.blockType === "h2") {
+      x += 2;
+      width -= 4;
+    }
+    if (options.blockType === "h3") {
+      x += 4;
+      width -= 8;
+    }
+  }
+
   return { x, width, radius, align };
 }
 
 function getAfterDecorationHeight(options: DrawTextOptions) {
-  return options.blockType === "h1" && options.themeId !== "apple-notes" ? 16 : 0;
+  if (options.blockType !== "h1") return 0;
+
+  switch (options.themeId) {
+    case "apple-notes":
+      return 0;
+    case "ink-scroll":
+      return 10;
+    case "turquoise-green":
+    case "taro-purple":
+    case "cream-coffee":
+      return 14;
+    default:
+      return 16;
+  }
 }
 
 function drawAfterTextDecoration(
@@ -518,14 +1223,89 @@ function drawAfterTextDecoration(
 ) {
   if (getAfterDecorationHeight(options) === 0) return;
 
-  const width = 40;
-  const height = 4;
-  const y = options.y + textBoxHeight + 12;
-  const x = options.themeId === "bytedance" ? boxX + (boxWidth - width) / 2 : boxX;
+  const y = options.y + textBoxHeight;
 
-  ctx.fillStyle = getTitleAccentPaint(ctx, options.themeId, x, width);
-  roundRect(ctx, x, y, width, height, 2);
-  ctx.fill();
+  if (options.themeId === "bytedance" || options.themeId === "alibaba") {
+    const width = 40;
+    const lineY = y + 12;
+    const x = options.themeId === "bytedance" ? boxX + (boxWidth - width) / 2 : boxX;
+    ctx.fillStyle = getTitleAccentPaint(ctx, options.themeId, x, width);
+    roundRect(ctx, x, lineY, width, 4, 2);
+    ctx.fill();
+    return;
+  }
+
+  if (options.themeId === "turquoise-green") {
+    const x = boxX + 38;
+    const width = Math.min(190, boxWidth - 52);
+    const gradient = ctx.createLinearGradient(x, 0, x + width, 0);
+    gradient.addColorStop(0, "#69cdb9");
+    gradient.addColorStop(1, "#41bfa7");
+    ctx.fillStyle = gradient;
+    roundRect(ctx, x, y + 7, width, 3, 1.5);
+    ctx.fill();
+    return;
+  }
+
+  if (options.themeId === "rouge-red") {
+    const x = boxX + 18;
+    const width = Math.min(boxWidth * 0.72, 250);
+    ctx.save();
+    ctx.strokeStyle = "#f05264";
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x, y + 8);
+    ctx.quadraticCurveTo(x + width * 0.45, y + 3, x + width, y + 7);
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(216, 58, 86, 0.52)";
+    ctx.beginPath();
+    ctx.moveTo(x + 10, y + 11);
+    ctx.lineTo(x + width - 12, y + 10);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (options.themeId === "taro-purple") {
+    const width = Math.min(160, boxWidth - 70);
+    const x = boxX + (boxWidth - width) / 2;
+    ctx.fillStyle = "#6c4db2";
+    ctx.fillRect(x, y + 5, width, 2);
+    ctx.fillStyle = "rgba(184, 155, 232, 0.8)";
+    ctx.fillRect(x, y + 9, width, 2);
+    [x - 12, x + width + 12].forEach((dotX) => {
+      ctx.fillStyle = "#9a7bd1";
+      ctx.beginPath();
+      ctx.arc(dotX, y + 8, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    return;
+  }
+
+  if (options.themeId === "ink-scroll") {
+    const lineY = y + 5;
+    ctx.strokeStyle = "rgba(22, 78, 74, 0.42)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(boxX + 42, lineY);
+    ctx.lineTo(boxX + boxWidth, lineY);
+    ctx.stroke();
+    drawDiamond(ctx, boxX + boxWidth - 2, lineY, 3, "#c9483b");
+    return;
+  }
+
+  if (options.themeId === "cream-coffee") {
+    const lineY = y + 7;
+    ctx.strokeStyle = "#c9864f";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(boxX + 30, lineY);
+    ctx.lineTo(boxX + boxWidth - 8, lineY);
+    ctx.stroke();
+    drawFourPointStar(ctx, boxX + boxWidth - 8, lineY, 4, "#b86f36");
+  }
 }
 
 function getRoleBackground(
@@ -542,6 +1322,12 @@ function getRoleBackground(
   if (options.themeId === "bytedance") {
     gradient.addColorStop(0, "#1677ff");
     gradient.addColorStop(1, "#09c9d5");
+    return gradient;
+  }
+
+  if (options.themeId === "turquoise-green") {
+    gradient.addColorStop(0, "#176b5b");
+    gradient.addColorStop(1, "#238b78");
     return gradient;
   }
 
@@ -564,7 +1350,7 @@ function getTitleAccentPaint(
     return gradient;
   }
 
-  return "#ff6a00";
+  return themeId === "alibaba" ? "#ff6a00" : "#d83a56";
 }
 
 function drawWavyUnderline(

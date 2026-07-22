@@ -20,14 +20,14 @@ export type TextRoleStyle = {
   paddingLeft: number;
 };
 
-type FontOption = {
+export type FontOption = {
   id: FontFamilyId;
   label: string;
   cssFamily: string;
   canvasFamily: string;
 };
 
-type ThemeOption = {
+export type ThemeOption = {
   id: ThemeId;
   label: string;
   exportName: string;
@@ -204,6 +204,141 @@ const THEME_CONFIGS: Record<ThemeId, ThemeConfig> = {
     subtitleWeight: 850,
     paragraphWeight: 650,
   },
+  "turquoise-green": {
+    id: "turquoise-green",
+    label: "松石绿",
+    exportName: "turquoise-green",
+    swatches: ["#176b5b", "#41bfa7", "#e7f7f2"],
+    pageBackground: "#fffcf5",
+    textColor: "#35423d",
+    titleColor: "#24302d",
+    subtitleColor: "#176b5b",
+    accentColor: "#176b5b",
+    accentAltColor: "#41bfa7",
+    mutedColor: "#6f7d77",
+    dividerColor: "#b8ddd4",
+    highlightColor: "rgba(128, 224, 199, 0.38)",
+    underlineColor: "#176b5b",
+    shadow: "0 18px 42px rgba(31, 105, 89, 0.14)",
+    paddingX: 24,
+    paddingTop: 46,
+    paddingBottom: 38,
+    dividerHeight: 1,
+    dividerMarginTop: 8,
+    dividerMarginBottom: 22,
+    titleWeight: 900,
+    headingWeight: 900,
+    subtitleWeight: 850,
+    paragraphWeight: 500,
+  },
+  "rouge-red": {
+    id: "rouge-red",
+    label: "胭脂红",
+    exportName: "rouge-red",
+    swatches: ["#d83a56", "#f26b6b", "#fff1f3"],
+    pageBackground: "#fff8f7",
+    textColor: "#40363a",
+    titleColor: "#2b2528",
+    subtitleColor: "#c72f4f",
+    accentColor: "#d83a56",
+    accentAltColor: "#f26b6b",
+    mutedColor: "#816d74",
+    dividerColor: "#e9b7c1",
+    highlightColor: "rgba(255, 203, 213, 0.58)",
+    underlineColor: "#d83a56",
+    shadow: "0 18px 42px rgba(153, 43, 66, 0.14)",
+    paddingX: 24,
+    paddingTop: 46,
+    paddingBottom: 38,
+    dividerHeight: 1,
+    dividerMarginTop: 8,
+    dividerMarginBottom: 22,
+    titleWeight: 900,
+    headingWeight: 900,
+    subtitleWeight: 850,
+    paragraphWeight: 500,
+  },
+  "taro-purple": {
+    id: "taro-purple",
+    label: "香芋紫",
+    exportName: "taro-purple",
+    swatches: ["#5b3f8c", "#9a7bd1", "#eee8fa"],
+    pageBackground: "#fcfaff",
+    textColor: "#423b4a",
+    titleColor: "#31205f",
+    subtitleColor: "#5b3f8c",
+    accentColor: "#6c4db2",
+    accentAltColor: "#b89be8",
+    mutedColor: "#786c88",
+    dividerColor: "#d9cced",
+    highlightColor: "rgba(215, 194, 244, 0.55)",
+    underlineColor: "#6c4db2",
+    shadow: "0 18px 42px rgba(93, 62, 142, 0.14)",
+    paddingX: 24,
+    paddingTop: 44,
+    paddingBottom: 38,
+    dividerHeight: 1,
+    dividerMarginTop: 8,
+    dividerMarginBottom: 22,
+    titleWeight: 900,
+    headingWeight: 900,
+    subtitleWeight: 850,
+    paragraphWeight: 500,
+  },
+  "ink-scroll": {
+    id: "ink-scroll",
+    label: "墨青书卷",
+    exportName: "ink-scroll",
+    swatches: ["#164e4a", "#2f7c75", "#fbf7ec"],
+    pageBackground: "#fbf7ec",
+    textColor: "#303532",
+    titleColor: "#153f3d",
+    subtitleColor: "#164e4a",
+    accentColor: "#164e4a",
+    accentAltColor: "#2f7c75",
+    mutedColor: "#697b76",
+    dividerColor: "#9ab8b1",
+    highlightColor: "rgba(186, 215, 205, 0.55)",
+    underlineColor: "#c9483b",
+    shadow: "0 18px 42px rgba(38, 78, 73, 0.14)",
+    paddingX: 30,
+    paddingTop: 50,
+    paddingBottom: 42,
+    dividerHeight: 1,
+    dividerMarginTop: 8,
+    dividerMarginBottom: 22,
+    titleWeight: 900,
+    headingWeight: 850,
+    subtitleWeight: 850,
+    paragraphWeight: 500,
+  },
+  "cream-coffee": {
+    id: "cream-coffee",
+    label: "奶油咖杂志",
+    exportName: "cream-coffee",
+    swatches: ["#49352c", "#c9864f", "#fff9ef"],
+    pageBackground: "#fff9ef",
+    textColor: "#4f413a",
+    titleColor: "#49352c",
+    subtitleColor: "#49352c",
+    accentColor: "#b86f36",
+    accentAltColor: "#d39a66",
+    mutedColor: "#88746a",
+    dividerColor: "#ddbea0",
+    highlightColor: "rgba(233, 203, 169, 0.6)",
+    underlineColor: "#b86f36",
+    shadow: "0 18px 42px rgba(104, 70, 49, 0.16)",
+    paddingX: 24,
+    paddingTop: 46,
+    paddingBottom: 38,
+    dividerHeight: 1,
+    dividerMarginTop: 8,
+    dividerMarginBottom: 22,
+    titleWeight: 900,
+    headingWeight: 900,
+    subtitleWeight: 850,
+    paragraphWeight: 500,
+  },
 };
 
 export const THEME_OPTIONS: ThemeOption[] = Object.values(THEME_CONFIGS).map(
@@ -306,36 +441,20 @@ function roundHalf(value: number) {
   return Math.round(value * 2) / 2;
 }
 
-function getThemeScale(themeId: ThemeId) {
-  if (themeId === "bytedance") {
-    return {
-      titleOffset: 4.5,
-      headingOffset: 3.5,
-      subtitleOffset: 1.5,
-      titleLineOffset: 10,
-      headingLineOffset: 9,
-      subtitleLineOffset: 10,
-      titleMarginBottom: 18,
-      headingMarginBottom: 20,
-      subtitleMarginBottom: 15,
-    };
-  }
+type ThemeScale = {
+  titleOffset: number;
+  headingOffset: number;
+  subtitleOffset: number;
+  titleLineOffset: number;
+  headingLineOffset: number;
+  subtitleLineOffset: number;
+  titleMarginBottom: number;
+  headingMarginBottom: number;
+  subtitleMarginBottom: number;
+};
 
-  if (themeId === "alibaba") {
-    return {
-      titleOffset: 4,
-      headingOffset: 3,
-      subtitleOffset: 1.5,
-      titleLineOffset: 10,
-      headingLineOffset: 8.5,
-      subtitleLineOffset: 10,
-      titleMarginBottom: 18,
-      headingMarginBottom: 22,
-      subtitleMarginBottom: 18,
-    };
-  }
-
-  return {
+const THEME_SCALES: Record<ThemeId, ThemeScale> = {
+  "apple-notes": {
     titleOffset: 2.5,
     headingOffset: 1,
     subtitleOffset: 0,
@@ -345,27 +464,143 @@ function getThemeScale(themeId: ThemeId) {
     titleMarginBottom: 16,
     headingMarginBottom: 12,
     subtitleMarginBottom: 11,
-  };
+  },
+  bytedance: {
+    titleOffset: 4.5,
+    headingOffset: 3.5,
+    subtitleOffset: 1.5,
+    titleLineOffset: 10,
+    headingLineOffset: 9,
+    subtitleLineOffset: 10,
+    titleMarginBottom: 18,
+    headingMarginBottom: 20,
+    subtitleMarginBottom: 15,
+  },
+  alibaba: {
+    titleOffset: 4,
+    headingOffset: 3,
+    subtitleOffset: 1.5,
+    titleLineOffset: 10,
+    headingLineOffset: 8.5,
+    subtitleLineOffset: 10,
+    titleMarginBottom: 18,
+    headingMarginBottom: 22,
+    subtitleMarginBottom: 18,
+  },
+  "turquoise-green": {
+    titleOffset: 5,
+    headingOffset: 3,
+    subtitleOffset: 1.5,
+    titleLineOffset: 10,
+    headingLineOffset: 9,
+    subtitleLineOffset: 9,
+    titleMarginBottom: 18,
+    headingMarginBottom: 18,
+    subtitleMarginBottom: 14,
+  },
+  "rouge-red": {
+    titleOffset: 5,
+    headingOffset: 3,
+    subtitleOffset: 1.5,
+    titleLineOffset: 10,
+    headingLineOffset: 9,
+    subtitleLineOffset: 9,
+    titleMarginBottom: 18,
+    headingMarginBottom: 18,
+    subtitleMarginBottom: 14,
+  },
+  "taro-purple": {
+    titleOffset: 4.5,
+    headingOffset: 3,
+    subtitleOffset: 1.5,
+    titleLineOffset: 10,
+    headingLineOffset: 9,
+    subtitleLineOffset: 9,
+    titleMarginBottom: 18,
+    headingMarginBottom: 18,
+    subtitleMarginBottom: 14,
+  },
+  "ink-scroll": {
+    titleOffset: 5,
+    headingOffset: 3,
+    subtitleOffset: 1.5,
+    titleLineOffset: 11,
+    headingLineOffset: 9,
+    subtitleLineOffset: 9,
+    titleMarginBottom: 18,
+    headingMarginBottom: 18,
+    subtitleMarginBottom: 14,
+  },
+  "cream-coffee": {
+    titleOffset: 5,
+    headingOffset: 3,
+    subtitleOffset: 1.5,
+    titleLineOffset: 10,
+    headingLineOffset: 9,
+    subtitleLineOffset: 9,
+    titleMarginBottom: 18,
+    headingMarginBottom: 18,
+    subtitleMarginBottom: 14,
+  },
+};
+
+function getThemeScale(themeId: ThemeId) {
+  return THEME_SCALES[themeId];
 }
 
 function getTitleDecoration(themeId: ThemeId): Omit<
   TextRoleStyle,
   "fontSize" | "fontWeight" | "lineHeight" | "marginBottom" | "color"
 > {
-  if (themeId === "bytedance") {
-    return emptyDecoration();
+  switch (themeId) {
+    case "turquoise-green":
+      return {
+        ...emptyDecoration(),
+        paddingLeft: 38,
+        paddingTop: 2,
+      };
+    case "rouge-red":
+      return {
+        ...emptyDecoration(),
+        paddingTop: 8,
+        paddingLeft: 18,
+      };
+    case "taro-purple":
+      return {
+        ...emptyDecoration(),
+        backgroundColor: "#ffffff",
+        paddingTop: 14,
+        paddingRight: 18,
+        paddingBottom: 14,
+        paddingLeft: 18,
+      };
+    case "ink-scroll":
+      return {
+        ...emptyDecoration(),
+        paddingTop: 12,
+        paddingLeft: 42,
+      };
+    case "cream-coffee":
+      return {
+        ...emptyDecoration(),
+        paddingTop: 2,
+        paddingLeft: 30,
+      };
+    default:
+      return emptyDecoration();
   }
-
-  if (themeId === "alibaba") {
-    return emptyDecoration();
-  }
-
-  return emptyDecoration();
 }
 
 function getHeadingColor(themeId: ThemeId, theme: ThemeConfig) {
-  if (themeId === "bytedance") return "#ffffff";
-  if (themeId === "alibaba") return "#ffffff";
+  if (
+    themeId === "bytedance" ||
+    themeId === "alibaba" ||
+    themeId === "turquoise-green" ||
+    themeId === "rouge-red" ||
+    themeId === "cream-coffee"
+  ) {
+    return "#ffffff";
+  }
   return theme.titleColor;
 }
 
@@ -395,6 +630,59 @@ function getHeadingDecoration(themeId: ThemeId, theme: ThemeConfig): Omit<
     };
   }
 
+  if (themeId === "turquoise-green") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "linear-gradient(135deg, #176b5b 0%, #238b78 100%)",
+      paddingTop: 7,
+      paddingRight: 68,
+      paddingBottom: 8,
+      paddingLeft: 18,
+    };
+  }
+
+  if (themeId === "rouge-red") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: theme.accentColor,
+      paddingTop: 7,
+      paddingRight: 54,
+      paddingBottom: 8,
+      paddingLeft: 18,
+    };
+  }
+
+  if (themeId === "taro-purple") {
+    return {
+      ...emptyDecoration(),
+      paddingTop: 7,
+      paddingRight: 16,
+      paddingBottom: 8,
+      paddingLeft: 54,
+    };
+  }
+
+  if (themeId === "ink-scroll") {
+    return {
+      ...emptyDecoration(),
+      paddingTop: 6,
+      paddingRight: 88,
+      paddingBottom: 7,
+      paddingLeft: 88,
+    };
+  }
+
+  if (themeId === "cream-coffee") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: theme.accentColor,
+      paddingTop: 7,
+      paddingRight: 20,
+      paddingBottom: 8,
+      paddingLeft: 48,
+    };
+  }
+
   return emptyDecoration();
 }
 
@@ -421,6 +709,60 @@ function getSubtitleDecoration(themeId: ThemeId, theme: ThemeConfig): Omit<
       borderLeftColor: theme.accentColor,
       borderLeftWidth: 4,
       paddingLeft: 12,
+    };
+  }
+
+  if (themeId === "turquoise-green") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "#effaf7",
+      paddingTop: 8,
+      paddingRight: 48,
+      paddingBottom: 8,
+      paddingLeft: 16,
+    };
+  }
+
+  if (themeId === "rouge-red") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "#fff1f3",
+      paddingTop: 9,
+      paddingRight: 14,
+      paddingBottom: 9,
+      paddingLeft: 34,
+    };
+  }
+
+  if (themeId === "taro-purple") {
+    return {
+      ...emptyDecoration(),
+      paddingTop: 8,
+      paddingRight: 24,
+      paddingBottom: 8,
+      paddingLeft: 24,
+    };
+  }
+
+  if (themeId === "ink-scroll") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "rgba(226, 239, 234, 0.88)",
+      paddingTop: 8,
+      paddingRight: 12,
+      paddingBottom: 8,
+      paddingLeft: 46,
+    };
+  }
+
+  if (themeId === "cream-coffee") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "#f5e9d9",
+      paddingTop: 10,
+      paddingRight: 16,
+      paddingBottom: 10,
+      paddingLeft: 44,
     };
   }
 

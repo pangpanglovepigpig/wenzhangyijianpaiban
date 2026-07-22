@@ -1,5 +1,13 @@
 export type BlockType = "h1" | "h2" | "h3" | "p" | "hr";
-export type ThemeId = "apple-notes" | "bytedance" | "alibaba";
+export type ThemeId =
+  | "apple-notes"
+  | "bytedance"
+  | "alibaba"
+  | "turquoise-green"
+  | "rouge-red"
+  | "taro-purple"
+  | "ink-scroll"
+  | "cream-coffee";
 export type FontFamilyId = "system" | "hei" | "song" | "kai";
 export type InlineColor = "red" | "blue";
 

@@ -101,7 +101,7 @@ h2 {
 .source-input {
   display: block;
   width: calc(100% - 24px);
-  min-height: calc(100vh - 344px);
+  min-height: max(240px, calc(100vh - 410px));
   margin: 12px;
   padding: 14px;
   resize: vertical;
@@ -197,7 +197,7 @@ h2 {
 
 .theme-segment {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -963,9 +963,12 @@ button.download-link {
     flex-wrap: wrap;
   }
 
-  .style-setting-grid,
-  .theme-segment {
+  .style-setting-grid {
     grid-template-columns: 1fr;
+  }
+
+  .theme-segment {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .preview-scroll {
