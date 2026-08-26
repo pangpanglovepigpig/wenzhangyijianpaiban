@@ -1,5 +1,6 @@
 import type { ContentBlock, PageModel } from "./types";
 import { CARD_HEIGHT, CARD_WIDTH, type ResolvedCardStyle } from "./cardStyle";
+import { createId } from "./uuid";
 
 export const PAGE_WIDTH = CARD_WIDTH;
 export const PAGE_HEIGHT = CARD_HEIGHT;
@@ -21,7 +22,7 @@ export function paginateBlocks(
       const trailingDivider = current[current.length - 1]?.type === "hr" ? current[current.length - 1] : null;
       const previousBlocks = trailingDivider ? current.slice(0, -1) : current;
       if (previousBlocks.length > 0) {
-        pages.push({ id: crypto.randomUUID(), blocks: previousBlocks });
+        pages.push({ id: createId(), blocks: previousBlocks });
       }
       current = trailingDivider ? [trailingDivider, block] : [block];
       used = (trailingDivider ? measuredHeights.get(trailingDivider.id) ?? fallbackHeight(trailingDivider) : 0) + height;
@@ -33,10 +34,10 @@ export function paginateBlocks(
   });
 
   if (current.length > 0) {
-    pages.push({ id: crypto.randomUUID(), blocks: trimTrailingDivider(current) });
+    pages.push({ id: createId(), blocks: trimTrailingDivider(current) });
   }
 
-  return pages.length ? pages : [{ id: crypto.randomUUID(), blocks: [] }];
+  return pages.length ? pages : [{ id: createId(), blocks: [] }];
 }
 
 function trimTrailingDivider(blocks: ContentBlock[]) {

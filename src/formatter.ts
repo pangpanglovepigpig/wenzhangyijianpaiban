@@ -1,5 +1,6 @@
 import type { ContentBlock, InlineColor, RenderConfig, TextSegment } from "./types";
 import { CARD_HEIGHT, CARD_WIDTH } from "./cardStyle";
+import { createId } from "./uuid";
 
 export const IMAGE_CONFIG: RenderConfig = {
   markdown: "",
@@ -226,7 +227,7 @@ export function makeBlock(
   const normalizedText = normalizedSegments ? textFromSegments(normalizedSegments) : text;
 
   return {
-    id: crypto.randomUUID(),
+    id: createId(),
     type,
     text: normalizedText,
     segments: normalizedSegments,
