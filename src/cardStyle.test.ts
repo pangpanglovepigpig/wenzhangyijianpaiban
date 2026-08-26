@@ -18,6 +18,10 @@ const EXPECTED_THEME_IDS: ThemeId[] = [
   "taro-purple",
   "ink-scroll",
   "cream-coffee",
+  "sunny-checker",
+  "blue-journal",
+  "peach-soda",
+  "dopamine-collage",
 ];
 
 const EXPECTED_THEME_LABELS = [
@@ -29,18 +33,24 @@ const EXPECTED_THEME_LABELS = [
   "香芋紫",
   "墨青书卷",
   "奶油咖杂志",
+  "阳光棋盘",
+  "蓝白手账",
+  "蜜桃汽水",
+  "多巴胺拼贴",
 ];
+
+const NEW_THEME_IDS = EXPECTED_THEME_IDS.slice(8);
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("card themes", () => {
-  test("exposes eight themes in the approved order with unique ids and export names", () => {
+  test("exposes twelve themes in the approved order with unique ids and export names", () => {
     expect(THEME_OPTIONS.map((theme) => theme.id)).toEqual(EXPECTED_THEME_IDS);
     expect(THEME_OPTIONS.map((theme) => theme.label)).toEqual(EXPECTED_THEME_LABELS);
-    expect(new Set(THEME_OPTIONS.map((theme) => theme.id)).size).toBe(8);
-    expect(new Set(THEME_OPTIONS.map((theme) => theme.exportName)).size).toBe(8);
+    expect(new Set(THEME_OPTIONS.map((theme) => theme.id)).size).toBe(12);
+    expect(new Set(THEME_OPTIONS.map((theme) => theme.exportName)).size).toBe(12);
   });
 
   test.each([14, 16.5, 20])("resolves valid dimensions and typography at %spx", (baseFontSize) => {
@@ -67,6 +77,15 @@ describe("card themes", () => {
       expect(hasDecoration(style.heading)).toBe(true);
       expect(hasDecoration(style.subtitle)).toBe(true);
       expect(new Set([roleSignature(style.title), roleSignature(style.heading), roleSignature(style.subtitle)]).size).toBe(3);
+    });
+  });
+
+  test("resolves theme-aware inline colors for the four approved themes", () => {
+    NEW_THEME_IDS.forEach((themeId) => {
+      const style = resolveCardStyle({ themeId, fontFamilyId: "system", baseFontSize: 16.5 });
+      expect(style.inlineColors.red).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(style.inlineColors.blue).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(style.inlineColors.red).not.toBe(style.inlineColors.blue);
     });
   });
 

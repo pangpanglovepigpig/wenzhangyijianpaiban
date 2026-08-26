@@ -2,11 +2,6 @@ import { CARD_HEIGHT, CARD_WIDTH, type ResolvedCardStyle, type TextRoleStyle } f
 import type { ContentBlock, InlineColor, PageModel, TextSegment } from "./types";
 
 const EXPORT_SCALE = 2;
-const INLINE_COLORS: Record<InlineColor, string> = {
-  red: "#d93025",
-  blue: "#1677ff",
-};
-
 type DrawTextOptions = {
   blockType: ContentBlock["type"];
   themeId: ResolvedCardStyle["theme"]["id"];
@@ -26,6 +21,7 @@ type DrawTextOptions = {
   underlineColor: string;
   underlineThickness: number;
   underlineOffset: number;
+  inlineColors: Record<InlineColor, string>;
 };
 
 type TextRun = {
@@ -151,6 +147,13 @@ const THEME_PAINTERS: Record<ThemeId, ThemePainter> = {
   "taro-purple": { paintBackdrop: paintTaroBackdrop, drawChrome: drawTaroChrome },
   "ink-scroll": { paintBackdrop: paintInkBackdrop, drawChrome: drawInkChrome },
   "cream-coffee": { paintBackdrop: paintCreamBackdrop, drawChrome: drawCreamChrome },
+  "sunny-checker": { paintBackdrop: paintSunnyCheckerBackdrop, drawChrome: drawSunnyCheckerChrome },
+  "blue-journal": { paintBackdrop: paintBlueJournalBackdrop, drawChrome: drawBlueJournalChrome },
+  "peach-soda": { paintBackdrop: paintPeachSodaBackdrop, drawChrome: drawPeachSodaChrome },
+  "dopamine-collage": {
+    paintBackdrop: paintDopamineCollageBackdrop,
+    drawChrome: drawDopamineCollageChrome,
+  },
 };
 
 function paintBackground(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
@@ -355,6 +358,132 @@ function paintCreamBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCa
   ctx.restore();
 }
 
+function paintSunnyCheckerBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  drawCheckerGrid(ctx, 0, 0, cardStyle.width, cardStyle.height, 12, "rgba(243, 200, 67, 0.055)");
+  ctx.fillStyle = "rgba(255, 228, 107, 0.72)";
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(136, 0);
+  ctx.lineTo(94, 34);
+  ctx.lineTo(116, 76);
+  ctx.lineTo(0, 92);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "rgba(79, 195, 173, 0.27)";
+  ctx.fillRect(cardStyle.width - 64, 0, 64, 86);
+  ctx.fillStyle = "rgba(255, 139, 112, 0.3)";
+  ctx.beginPath();
+  ctx.moveTo(cardStyle.width, cardStyle.height - 100);
+  ctx.lineTo(cardStyle.width, cardStyle.height);
+  ctx.lineTo(cardStyle.width - 112, cardStyle.height);
+  ctx.lineTo(cardStyle.width - 84, cardStyle.height - 29);
+  ctx.lineTo(cardStyle.width - 101, cardStyle.height - 55);
+  ctx.lineTo(cardStyle.width - 74, cardStyle.height - 74);
+  ctx.lineTo(cardStyle.width - 83, cardStyle.height - 100);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function paintBlueJournalBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(133, 182, 239, 0.16)";
+  ctx.lineWidth = 0.8;
+  for (let x = 0; x <= cardStyle.width; x += 18) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, cardStyle.height);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= cardStyle.height; y += 18) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(cardStyle.width, y);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(220, 236, 255, 0.78)";
+  ctx.fillRect(0, 0, 18, cardStyle.height);
+  ctx.fillStyle = "rgba(255, 207, 74, 0.78)";
+  ctx.beginPath();
+  ctx.moveTo(cardStyle.width - 30, 0);
+  ctx.lineTo(cardStyle.width, 0);
+  ctx.lineTo(cardStyle.width, 104);
+  ctx.lineTo(cardStyle.width - 19, 91);
+  ctx.lineTo(cardStyle.width - 33, 104);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "rgba(159, 210, 255, 0.24)";
+  ctx.beginPath();
+  ctx.moveTo(0, cardStyle.height - 76);
+  ctx.lineTo(86, cardStyle.height);
+  ctx.lineTo(0, cardStyle.height);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function paintPeachSodaBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  const gradient = ctx.createLinearGradient(0, 0, cardStyle.width, cardStyle.height);
+  gradient.addColorStop(0, "#fff5ef");
+  gradient.addColorStop(0.58, "#fffaf6");
+  gradient.addColorStop(1, "#eefbf7");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, cardStyle.width, cardStyle.height);
+
+  ctx.save();
+  for (let x = 10; x < cardStyle.width; x += 42) {
+    for (let y = 10; y < cardStyle.height; y += 42) {
+      ctx.fillStyle = "rgba(237, 130, 111, 0.075)";
+      ctx.beginPath();
+      ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(72, 187, 166, 0.07)";
+      ctx.beginPath();
+      ctx.arc(x + 21, y + 19, 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.fillStyle = "rgba(255, 177, 141, 0.26)";
+  ctx.beginPath();
+  ctx.arc(cardStyle.width - 32, 48, 78, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(142, 222, 205, 0.24)";
+  ctx.beginPath();
+  ctx.arc(28, cardStyle.height - 34, 82, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function paintDopamineCollageBackdrop(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  drawDotGrid(ctx, 4, 4, 25, 34, 18, "rgba(22, 70, 184, 0.1)");
+  ctx.fillStyle = "rgba(255, 207, 51, 0.82)";
+  ctx.beginPath();
+  ctx.arc(cardStyle.width - 12, 48, 74, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255, 108, 98, 0.9)";
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(110, 0);
+  ctx.lineTo(72, 35);
+  ctx.lineTo(91, 72);
+  ctx.lineTo(0, 92);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "rgba(22, 70, 184, 0.9)";
+  ctx.beginPath();
+  ctx.moveTo(cardStyle.width - 90, cardStyle.height);
+  ctx.lineTo(cardStyle.width - 90, cardStyle.height - 69);
+  ctx.lineTo(cardStyle.width - 56, cardStyle.height - 94);
+  ctx.lineTo(cardStyle.width - 34, cardStyle.height - 69);
+  ctx.lineTo(cardStyle.width, cardStyle.height - 94);
+  ctx.lineTo(cardStyle.width, cardStyle.height);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawFooterBand(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle, color: string) {
   const y = cardStyle.height - 38;
   ctx.fillStyle = color;
@@ -469,6 +598,72 @@ function drawCreamChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardS
   ctx.restore();
 }
 
+function drawSunnyCheckerChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  drawCheckerGrid(ctx, cardStyle.width - 48, 18, 24, 24, 8, "#2f7770");
+  ctx.strokeStyle = "rgba(47, 119, 112, 0.48)";
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(cardStyle.width - 32, 18, 20, 20);
+  ctx.fillStyle = "#ffe46b";
+  roundRect(ctx, 30, cardStyle.height - 30, 118, 14, 7);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBlueJournalChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  for (let y = 76; y < cardStyle.height; y += 92) {
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(18, y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#90b8df";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  ["#ff7e72", "#ffcf4a", "#56c8b6"].forEach((color, index) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(cardStyle.width - 66 + index * 12, 27, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawPeachSodaChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  [
+    [cardStyle.width - 66, 146, 13],
+    [cardStyle.width - 40, 173, 7],
+    [cardStyle.width - 57, 194, 4],
+  ].forEach(([x, y, radius]) => {
+    ctx.strokeStyle = "rgba(255, 146, 122, 0.28)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  ctx.fillStyle = "rgba(255, 207, 190, 0.92)";
+  roundRect(ctx, 30, cardStyle.height - 30, 122, 14, 7);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawDopamineCollageChrome(ctx: CanvasRenderingContext2D, cardStyle: ResolvedCardStyle) {
+  ctx.save();
+  drawFourPointStar(ctx, cardStyle.width - 74, 34, 10, "#1646b8");
+  ctx.fillStyle = "#62d0bb";
+  roundRect(ctx, 30, cardStyle.height - 30, 124, 14, 7);
+  ctx.fill();
+  ctx.fillStyle = "rgba(98, 208, 187, 0.82)";
+  ctx.save();
+  ctx.translate(34, cardStyle.height - 58);
+  ctx.rotate(-0.32);
+  ctx.fillRect(0, 0, 34, 24);
+  ctx.restore();
+  ctx.restore();
+}
+
 function drawDotGrid(
   ctx: CanvasRenderingContext2D,
   startX: number,
@@ -484,6 +679,26 @@ function drawDotGrid(
       ctx.beginPath();
       ctx.arc(startX + column * gap, startY + row * gap, 1.45, 0, Math.PI * 2);
       ctx.fill();
+    }
+  }
+}
+
+function drawCheckerGrid(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  size: number,
+  color: string,
+) {
+  ctx.fillStyle = color;
+  const columns = Math.ceil(width / size);
+  const rows = Math.ceil(height / size);
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      if ((row + column) % 2 !== 0) continue;
+      ctx.fillRect(x + column * size, y + row * size, size, size);
     }
   }
 }
@@ -507,6 +722,24 @@ function drawFourPointStar(
   ctx.lineTo(x - radius * 0.28, y - radius * 0.28);
   ctx.closePath();
   ctx.fill();
+}
+
+function drawMarkerText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  color: string,
+  fontFamily: string,
+  fontSize: number,
+) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = canvasFont(900, fontSize, fontFamily);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(text, x, y);
+  ctx.restore();
 }
 
 function drawDiamond(
@@ -644,6 +877,7 @@ function getTextOptions(block: ContentBlock, y: number, cardStyle: ResolvedCardS
     underlineColor: cardStyle.underline.color,
     underlineThickness: cardStyle.underline.thickness,
     underlineOffset: cardStyle.underline.offset,
+    inlineColors: cardStyle.inlineColors,
   };
 }
 
@@ -1002,6 +1236,161 @@ function drawCustomTextBoxBackground(
     }
   }
 
+  if (options.themeId === "sunny-checker") {
+    if (options.blockType === "h1") {
+      ctx.fillStyle = "rgba(255, 139, 112, 0.62)";
+      roundRect(ctx, box.x + 5, y + 5, box.width, height, 5);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      roundRect(ctx, box.x, y, box.width, height, 5);
+      ctx.fill();
+      return true;
+    }
+    if (options.blockType === "h2") {
+      ctx.fillStyle = "#ffe16a";
+      roundRect(ctx, box.x, y, box.width, height, 5);
+      ctx.fill();
+      return true;
+    }
+    if (options.blockType === "h3") {
+      ctx.fillStyle = "#ffffff";
+      roundRect(ctx, box.x, y, box.width, height, 7);
+      ctx.fill();
+      return true;
+    }
+  }
+
+  if (options.themeId === "blue-journal") {
+    if (options.blockType === "h1") {
+      ctx.fillStyle = "rgba(165, 201, 238, 0.42)";
+      roundRect(ctx, box.x + 4, y + 5, box.width, height, 18);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      roundRect(ctx, box.x, y, box.width, height, 18);
+      ctx.fill();
+      return true;
+    }
+    if (options.blockType === "h2") {
+      const gradient = ctx.createLinearGradient(box.x, 0, box.x + box.width, 0);
+      gradient.addColorStop(0, "#4c92e8");
+      gradient.addColorStop(1, "#2e77d0");
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.moveTo(box.x + 8, y);
+      ctx.lineTo(box.x + box.width - 8, y);
+      ctx.lineTo(box.x + box.width, y + 8);
+      ctx.lineTo(box.x + box.width - 8, y + height / 2);
+      ctx.lineTo(box.x + box.width, y + height - 8);
+      ctx.lineTo(box.x + box.width - 8, y + height);
+      ctx.lineTo(box.x + 8, y + height);
+      ctx.lineTo(box.x, y + height - 8);
+      ctx.lineTo(box.x + 8, y + height / 2);
+      ctx.lineTo(box.x, y + 8);
+      ctx.closePath();
+      ctx.fill();
+      return true;
+    }
+    if (options.blockType === "h3") {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+      roundRect(ctx, box.x, y, box.width, height, 9);
+      ctx.fill();
+      return true;
+    }
+  }
+
+  if (options.themeId === "peach-soda") {
+    if (options.blockType === "h1") {
+      ctx.fillStyle = "rgba(242, 154, 131, 0.24)";
+      roundRect(ctx, box.x + 4, y + 5, box.width, height, 18);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      roundRect(ctx, box.x, y, box.width, height, 18);
+      ctx.fill();
+      ctx.fillStyle = "#ffe1d5";
+      ctx.fillRect(box.x, y + height - 11, box.width, 11);
+      ctx.fillStyle = "#ffb09a";
+      ctx.fillRect(box.x, y + height - 11, Math.min(98, box.width * 0.3), 11);
+      return true;
+    }
+    if (options.blockType === "h2") {
+      const gradient = ctx.createLinearGradient(box.x, 0, box.x + box.width, 0);
+      gradient.addColorStop(0, "#ff8f79");
+      gradient.addColorStop(1, "#ffb37e");
+      ctx.fillStyle = gradient;
+      const fold = Math.min(20, height / 2);
+      ctx.beginPath();
+      ctx.moveTo(box.x, y);
+      ctx.lineTo(box.x + box.width - fold, y);
+      ctx.lineTo(box.x + box.width, y + height / 2);
+      ctx.lineTo(box.x + box.width - fold, y + height);
+      ctx.lineTo(box.x, y + height);
+      ctx.lineTo(box.x + 8, y + height / 2);
+      ctx.closePath();
+      ctx.fill();
+      return true;
+    }
+    if (options.blockType === "h3") {
+      ctx.fillStyle = "#e9fbf6";
+      roundRect(ctx, box.x, y, box.width, height, 10);
+      ctx.fill();
+      return true;
+    }
+  }
+
+  if (options.themeId === "dopamine-collage") {
+    if (options.blockType === "h1") {
+      ctx.fillStyle = "#1646b8";
+      roundRect(ctx, box.x + 7, y + 8, box.width, height, 5);
+      ctx.fill();
+      ctx.fillStyle = "#ffcf33";
+      roundRect(ctx, box.x - 4, y + 4, box.width, height, 5);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.moveTo(box.x + 10, y);
+      ctx.lineTo(box.x + box.width - 10, y);
+      ctx.lineTo(box.x + box.width, y + 10);
+      ctx.lineTo(box.x + box.width - 8, y + height / 2);
+      ctx.lineTo(box.x + box.width, y + height - 10);
+      ctx.lineTo(box.x + box.width - 10, y + height);
+      ctx.lineTo(box.x + 10, y + height);
+      ctx.lineTo(box.x, y + height - 10);
+      ctx.lineTo(box.x + 8, y + height / 2);
+      ctx.lineTo(box.x, y + 10);
+      ctx.closePath();
+      ctx.fill();
+      return true;
+    }
+    if (options.blockType === "h2") {
+      ctx.fillStyle = "#ff6c62";
+      ctx.beginPath();
+      ctx.moveTo(box.x + 8, y + 5);
+      ctx.lineTo(box.x + box.width - 15, y + 5);
+      ctx.lineTo(box.x + box.width, y + height / 2 + 5);
+      ctx.lineTo(box.x + box.width - 15, y + height + 5);
+      ctx.lineTo(box.x + 8, y + height + 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#1646b8";
+      ctx.beginPath();
+      ctx.moveTo(box.x, y);
+      ctx.lineTo(box.x + box.width - 15, y);
+      ctx.lineTo(box.x + box.width, y + height / 2);
+      ctx.lineTo(box.x + box.width - 15, y + height);
+      ctx.lineTo(box.x, y + height);
+      ctx.lineTo(box.x + 9, y + height / 2);
+      ctx.closePath();
+      ctx.fill();
+      return true;
+    }
+    if (options.blockType === "h3") {
+      ctx.fillStyle = "#ff766d";
+      roundRect(ctx, box.x, y, box.width, height, 8);
+      ctx.fill();
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -1187,6 +1576,221 @@ function drawTextBoxFrame(
       ctx.fillRect(box.x + 14, y + height - 11, 9, 9);
     }
   }
+
+  if (options.themeId === "sunny-checker") {
+    if (options.blockType === "h1") {
+      ctx.strokeStyle = "#2f7770";
+      ctx.lineWidth = 1.4;
+      roundRect(ctx, box.x, y, box.width, height, 5);
+      ctx.stroke();
+      drawCheckerGrid(ctx, box.x, y, box.width, 10, 5, "#2f7770");
+      ctx.fillStyle = "#ffe46b";
+      ctx.fillRect(box.x, y + 10, 54, Math.max(0, height - 10));
+      drawMarkerText(ctx, "H1", box.x + 27, y + height / 2 + 4, "#2f7770", options.fontFamily, 12);
+    }
+    if (options.blockType === "h2") {
+      ctx.fillStyle = "#4fc3ad";
+      roundRect(ctx, box.x, y, 50, height, 5);
+      ctx.fill();
+      drawMarkerText(ctx, "01", box.x + 25, y + height / 2 + 4, "#ffffff", options.fontFamily, 11);
+      drawCheckerGrid(ctx, box.x + box.width - 50, y, 50, height, 8, "#2f7770");
+      drawFourPointStar(ctx, box.x + box.width - 78, y + height / 2, 6, "#ffffff");
+    }
+    if (options.blockType === "h3") {
+      ctx.save();
+      ctx.setLineDash([7, 4]);
+      ctx.strokeStyle = "#2f7770";
+      ctx.lineWidth = 1.4;
+      roundRect(ctx, box.x, y, box.width, height, 7);
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = "#ff8b70";
+      roundRect(ctx, box.x + 12, y + 6, 42, Math.max(20, height - 12), 3);
+      ctx.fill();
+      drawMarkerText(ctx, "H3", box.x + 33, y + height / 2 + 4, "#ffffff", options.fontFamily, 10);
+      drawCheckerGrid(ctx, box.x + box.width - 48, y + 7, 24, 24, 8, "#2f7770");
+    }
+    return;
+  }
+
+  if (options.themeId === "blue-journal") {
+    if (options.blockType === "h1") {
+      ctx.strokeStyle = "#8cb8e5";
+      ctx.lineWidth = 1.2;
+      roundRect(ctx, box.x, y, box.width, height, 18);
+      ctx.stroke();
+      ctx.fillStyle = "#2f79d2";
+      ctx.beginPath();
+      ctx.moveTo(box.x + 18, y);
+      ctx.lineTo(box.x + 108, y);
+      ctx.lineTo(box.x + 118, y + 10);
+      ctx.lineTo(box.x + 18, y + 10);
+      ctx.closePath();
+      ctx.fill();
+      [y + 18, y + height - 18].forEach((dotY) => {
+        ctx.fillStyle = "#eef6ff";
+        ctx.beginPath();
+        ctx.arc(box.x + box.width - 20, dotY, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#8cb8e5";
+        ctx.stroke();
+      });
+    }
+    if (options.blockType === "h2") {
+      ctx.fillStyle = "rgba(185, 220, 255, 0.72)";
+      ctx.save();
+      ctx.translate(box.x + 24, y - 4);
+      ctx.rotate(-0.05);
+      ctx.fillRect(0, 0, 68, 16);
+      ctx.restore();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(box.x + 27, y + height / 2, 13, 0, Math.PI * 2);
+      ctx.fill();
+      drawMarkerText(ctx, "01", box.x + 27, y + height / 2 + 4, "#2e77d0", options.fontFamily, 10);
+    }
+    if (options.blockType === "h3") {
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = "#397fcf";
+      ctx.lineWidth = 1.2;
+      roundRect(ctx, box.x, y, box.width, height, 9);
+      ctx.stroke();
+      ctx.restore();
+      ctx.strokeStyle = "#2e77d0";
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, box.x + 12, y + height / 2 - 9, 18, 18, 5);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(box.x + 17, y + height / 2);
+      ctx.lineTo(box.x + 21, y + height / 2 + 4);
+      ctx.lineTo(box.x + 28, y + height / 2 - 5);
+      ctx.stroke();
+      ctx.strokeStyle = "#9cc8f1";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(box.x + box.width - 64, y + height / 2 - 4);
+      ctx.lineTo(box.x + box.width - 18, y + height / 2 - 4);
+      ctx.moveTo(box.x + box.width - 52, y + height / 2 + 5);
+      ctx.lineTo(box.x + box.width - 18, y + height / 2 + 5);
+      ctx.stroke();
+    }
+    return;
+  }
+
+  if (options.themeId === "peach-soda") {
+    if (options.blockType === "h1") {
+      ctx.strokeStyle = "#f1927e";
+      ctx.lineWidth = 1.3;
+      roundRect(ctx, box.x, y, box.width, height, 18);
+      ctx.stroke();
+      [[box.x + 42, "#8edecd", 8], [box.x + 61, "#ffd16a", 4], [box.x + box.width - 40, "#ffad95", 7]].forEach(
+        ([dotX, color, radius]) => {
+          ctx.fillStyle = color as string;
+          ctx.beginPath();
+          ctx.arc(dotX as number, y + 18, radius as number, 0, Math.PI * 2);
+          ctx.fill();
+        },
+      );
+    }
+    if (options.blockType === "h2") {
+      ctx.fillStyle = "#58c8b2";
+      roundRect(ctx, box.x + 12, y + 5, 38, Math.max(22, height - 10), 10);
+      ctx.fill();
+      drawMarkerText(ctx, "01", box.x + 31, y + height / 2 + 4, "#ffffff", options.fontFamily, 10);
+      ["#ffe074", "#ffffff"].forEach((color, index) => {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(box.x + box.width - 54 + index * 22, y + height / 2, index === 0 ? 8 : 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+    if (options.blockType === "h3") {
+      ctx.strokeStyle = "#55bea9";
+      ctx.lineWidth = 1.4;
+      roundRect(ctx, box.x, y, box.width, height, 10);
+      ctx.stroke();
+      ctx.fillStyle = "#58c8b2";
+      ctx.beginPath();
+      ctx.moveTo(box.x, y);
+      ctx.lineTo(box.x + 48, y);
+      ctx.lineTo(box.x + 60, y + height / 2);
+      ctx.lineTo(box.x + 48, y + height);
+      ctx.lineTo(box.x, y + height);
+      ctx.closePath();
+      ctx.fill();
+      [
+        [box.x + box.width - 52, "#ffb09a", 9],
+        [box.x + box.width - 29, "#ffd3c4", 6],
+        [box.x + box.width - 20, "#ffe074", 3.5],
+      ].forEach(([dotX, color, radius]) => {
+        ctx.fillStyle = color as string;
+        ctx.beginPath();
+        ctx.arc(dotX as number, y + height / 2, radius as number, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+    return;
+  }
+
+  if (options.themeId === "dopamine-collage") {
+    if (options.blockType === "h1") {
+      ctx.strokeStyle = "#14245c";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(box.x + 10, y);
+      ctx.lineTo(box.x + box.width - 10, y);
+      ctx.lineTo(box.x + box.width, y + 10);
+      ctx.lineTo(box.x + box.width - 8, y + height / 2);
+      ctx.lineTo(box.x + box.width, y + height - 10);
+      ctx.lineTo(box.x + box.width - 10, y + height);
+      ctx.lineTo(box.x + 10, y + height);
+      ctx.lineTo(box.x, y + height - 10);
+      ctx.lineTo(box.x + 8, y + height / 2);
+      ctx.lineTo(box.x, y + 10);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fillStyle = "rgba(255, 127, 114, 0.72)";
+      ctx.save();
+      ctx.translate(box.x + 22, y - 5);
+      ctx.rotate(-0.08);
+      ctx.fillRect(0, 0, 62, 17);
+      ctx.restore();
+      ctx.fillStyle = "rgba(98, 208, 187, 0.78)";
+      ctx.save();
+      ctx.translate(box.x + box.width - 92, y + height - 8);
+      ctx.rotate(0.06);
+      ctx.fillRect(0, 0, 62, 16);
+      ctx.restore();
+    }
+    if (options.blockType === "h2") {
+      ctx.fillStyle = "#ffcf33";
+      ctx.beginPath();
+      ctx.arc(box.x + 28, y + height / 2, 12, 0, Math.PI * 2);
+      ctx.fill();
+      drawMarkerText(ctx, "01", box.x + 28, y + height / 2 + 4, "#14245c", options.fontFamily, 10);
+      drawFourPointStar(ctx, box.x + box.width - 38, y + height / 2, 7, "#ffcf33");
+    }
+    if (options.blockType === "h3") {
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = "#1646b8";
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, box.x, y, box.width, height, 8);
+      ctx.stroke();
+      ctx.restore();
+      drawFourPointStar(ctx, box.x + 24, y + height / 2, 7, "#ffffff");
+      ctx.fillStyle = "#ffe074";
+      ctx.beginPath();
+      ctx.arc(box.x + box.width - 34, y + height / 2, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#62d0bb";
+      ctx.beginPath();
+      ctx.arc(box.x + box.width - 20, y + height / 2, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    return;
+  }
 }
 
 function getTextBox(options: DrawTextOptions): TextBox {
@@ -1252,6 +1856,23 @@ function getTextBox(options: DrawTextOptions): TextBox {
     }
   }
 
+  if (
+    options.themeId === "sunny-checker" ||
+    options.themeId === "blue-journal" ||
+    options.themeId === "peach-soda" ||
+    options.themeId === "dopamine-collage"
+  ) {
+    if (options.blockType === "h1") {
+      x += 3;
+      width -= 6;
+      align = "center";
+    }
+    if (options.blockType === "h3") {
+      x += 3;
+      width -= 6;
+    }
+  }
+
   return { x, width, radius, align };
 }
 
@@ -1267,6 +1888,11 @@ function getAfterDecorationHeight(options: DrawTextOptions) {
     case "taro-purple":
     case "cream-coffee":
       return 14;
+    case "sunny-checker":
+    case "blue-journal":
+    case "peach-soda":
+    case "dopamine-collage":
+      return 12;
     default:
       return 16;
   }
@@ -1282,6 +1908,44 @@ function drawAfterTextDecoration(
   if (getAfterDecorationHeight(options) === 0) return;
 
   const y = options.y + textBoxHeight;
+
+  if (options.themeId === "sunny-checker") {
+    ctx.fillStyle = "#2f7770";
+    ctx.fillRect(boxX + 70, y + 6, Math.min(120, boxWidth - 110), 2);
+    ctx.fillStyle = "#ff8b70";
+    ctx.fillRect(boxX + 70, y + 9, Math.min(72, boxWidth - 110), 2);
+    return;
+  }
+
+  if (options.themeId === "blue-journal") {
+    const width = Math.min(150, boxWidth - 40);
+    ctx.fillStyle = "#9cc8f1";
+    ctx.fillRect(boxX + (boxWidth - width) / 2, y + 7, width, 2);
+    ctx.fillStyle = "#ffcf4a";
+    ctx.beginPath();
+    ctx.arc(boxX + (boxWidth + width) / 2 + 10, y + 8, 3, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  if (options.themeId === "peach-soda") {
+    const x = boxX + 30;
+    ctx.fillStyle = "#ffb09a";
+    ctx.fillRect(x, y + 6, Math.min(112, boxWidth - 70), 3);
+    ctx.fillStyle = "#58c8b2";
+    ctx.fillRect(x + 122, y + 6, Math.min(54, boxWidth - 192), 3);
+    return;
+  }
+
+  if (options.themeId === "dopamine-collage") {
+    const width = Math.min(164, boxWidth - 60);
+    const x = boxX + (boxWidth - width) / 2;
+    ctx.fillStyle = "#ffcf33";
+    ctx.fillRect(x - 5, y + 6, width, 3);
+    ctx.fillStyle = "#1646b8";
+    ctx.fillRect(x + 5, y + 10, width, 3);
+    return;
+  }
 
   if (options.themeId === "bytedance" || options.themeId === "alibaba") {
     const width = 40;
@@ -1484,7 +2148,7 @@ function drawRichLine(
 
   line.runs.forEach((run) => {
     ctx.font = getRunFont(run, options);
-    ctx.fillStyle = run.color ? INLINE_COLORS[run.color] : options.color;
+    ctx.fillStyle = run.color ? options.inlineColors[run.color] : options.color;
     ctx.fillText(run.text, currentX, y);
     currentX += ctx.measureText(run.text).width;
   });

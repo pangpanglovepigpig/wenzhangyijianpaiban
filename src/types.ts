@@ -7,7 +7,11 @@ export type ThemeId =
   | "rouge-red"
   | "taro-purple"
   | "ink-scroll"
-  | "cream-coffee";
+  | "cream-coffee"
+  | "sunny-checker"
+  | "blue-journal"
+  | "peach-soda"
+  | "dopamine-collage";
 export type FontFamilyId = "system" | "hei" | "song" | "kai";
 export type InlineColor = "red" | "blue";
 

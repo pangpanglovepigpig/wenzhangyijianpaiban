@@ -45,6 +45,8 @@ type ThemeConfig = ThemeOption & {
   dividerColor: string;
   highlightColor: string;
   underlineColor: string;
+  inlineRedColor?: string;
+  inlineBlueColor?: string;
   shadow: string;
   paddingX: number;
   paddingTop: number;
@@ -86,6 +88,10 @@ export type ResolvedCardStyle = {
     color: string;
     thickness: number;
     offset: number;
+  };
+  inlineColors: {
+    red: string;
+    blue: string;
   };
 };
 
@@ -339,6 +345,122 @@ const THEME_CONFIGS: Record<ThemeId, ThemeConfig> = {
     subtitleWeight: 850,
     paragraphWeight: 500,
   },
+  "sunny-checker": {
+    id: "sunny-checker",
+    label: "阳光棋盘",
+    exportName: "sunny-checker",
+    swatches: ["#ffe46b", "#2f7770", "#ff8b70"],
+    pageBackground: "#fffdf4",
+    textColor: "#3f4d48",
+    titleColor: "#315d59",
+    subtitleColor: "#2f7770",
+    accentColor: "#f3c843",
+    accentAltColor: "#4fc3ad",
+    mutedColor: "#71827a",
+    dividerColor: "#e8c95c",
+    highlightColor: "rgba(191, 234, 223, 0.82)",
+    underlineColor: "#e85f5e",
+    inlineRedColor: "#e85f5e",
+    inlineBlueColor: "#2f7770",
+    shadow: "0 18px 42px rgba(76, 111, 91, 0.14)",
+    paddingX: 31,
+    paddingTop: 50,
+    paddingBottom: 38,
+    dividerHeight: 1,
+    dividerMarginTop: 8,
+    dividerMarginBottom: 20,
+    titleWeight: 900,
+    headingWeight: 900,
+    subtitleWeight: 900,
+    paragraphWeight: 500,
+  },
+  "blue-journal": {
+    id: "blue-journal",
+    label: "蓝白手账",
+    exportName: "blue-journal",
+    swatches: ["#2e77d0", "#f5faff", "#ffcf4a"],
+    pageBackground: "#f5faff",
+    textColor: "#29445f",
+    titleColor: "#173f70",
+    subtitleColor: "#1f5b9d",
+    accentColor: "#2e77d0",
+    accentAltColor: "#5aa7f2",
+    mutedColor: "#5f84aa",
+    dividerColor: "#9cc8f1",
+    highlightColor: "rgba(255, 229, 139, 0.82)",
+    underlineColor: "#e45155",
+    inlineRedColor: "#e45155",
+    inlineBlueColor: "#2e77d0",
+    shadow: "0 18px 42px rgba(48, 104, 161, 0.14)",
+    paddingX: 34,
+    paddingTop: 50,
+    paddingBottom: 38,
+    dividerHeight: 1,
+    dividerMarginTop: 8,
+    dividerMarginBottom: 20,
+    titleWeight: 900,
+    headingWeight: 900,
+    subtitleWeight: 900,
+    paragraphWeight: 500,
+  },
+  "peach-soda": {
+    id: "peach-soda",
+    label: "蜜桃汽水",
+    exportName: "peach-soda",
+    swatches: ["#ee7c6e", "#58c8b2", "#fff8f2"],
+    pageBackground: "#fff8f2",
+    textColor: "#563e3d",
+    titleColor: "#a94b4e",
+    subtitleColor: "#277c75",
+    accentColor: "#ee7c6e",
+    accentAltColor: "#58c8b2",
+    mutedColor: "#8b6a66",
+    dividerColor: "#f3baa9",
+    highlightColor: "rgba(255, 225, 140, 0.82)",
+    underlineColor: "#df5f60",
+    inlineRedColor: "#df5f60",
+    inlineBlueColor: "#277c75",
+    shadow: "0 18px 42px rgba(172, 97, 79, 0.14)",
+    paddingX: 34,
+    paddingTop: 50,
+    paddingBottom: 38,
+    dividerHeight: 1,
+    dividerMarginTop: 8,
+    dividerMarginBottom: 20,
+    titleWeight: 900,
+    headingWeight: 900,
+    subtitleWeight: 900,
+    paragraphWeight: 500,
+  },
+  "dopamine-collage": {
+    id: "dopamine-collage",
+    label: "多巴胺拼贴",
+    exportName: "dopamine-collage",
+    swatches: ["#1646b8", "#ff6c62", "#ffcf33"],
+    pageBackground: "#fffaf0",
+    textColor: "#26345b",
+    titleColor: "#14245c",
+    subtitleColor: "#ffffff",
+    accentColor: "#1646b8",
+    accentAltColor: "#ff6c62",
+    mutedColor: "#687296",
+    dividerColor: "#98a7d6",
+    highlightColor: "rgba(255, 207, 51, 0.82)",
+    underlineColor: "#e34f55",
+    inlineRedColor: "#e34f55",
+    inlineBlueColor: "#1646b8",
+    shadow: "0 18px 42px rgba(38, 67, 139, 0.16)",
+    paddingX: 32,
+    paddingTop: 50,
+    paddingBottom: 38,
+    dividerHeight: 1,
+    dividerMarginTop: 8,
+    dividerMarginBottom: 20,
+    titleWeight: 900,
+    headingWeight: 900,
+    subtitleWeight: 900,
+    paragraphWeight: 550,
+  },
 };
 
 export const THEME_OPTIONS: ThemeOption[] = Object.values(THEME_CONFIGS).map(
@@ -421,6 +543,10 @@ export function resolveCardStyle(settings: CardStyleSettings): ResolvedCardStyle
       color: theme.underlineColor,
       thickness: theme.id === "apple-notes" ? 1.2 : 1.35,
       offset: 4,
+    },
+    inlineColors: {
+      red: theme.inlineRedColor ?? "#d93025",
+      blue: theme.inlineBlueColor ?? "#1677ff",
     },
   };
 }
@@ -542,6 +668,50 @@ const THEME_SCALES: Record<ThemeId, ThemeScale> = {
     headingMarginBottom: 18,
     subtitleMarginBottom: 14,
   },
+  "sunny-checker": {
+    titleOffset: 5,
+    headingOffset: 3,
+    subtitleOffset: 1.5,
+    titleLineOffset: 10,
+    headingLineOffset: 9,
+    subtitleLineOffset: 9,
+    titleMarginBottom: 18,
+    headingMarginBottom: 18,
+    subtitleMarginBottom: 14,
+  },
+  "blue-journal": {
+    titleOffset: 5,
+    headingOffset: 3,
+    subtitleOffset: 1.5,
+    titleLineOffset: 10,
+    headingLineOffset: 9,
+    subtitleLineOffset: 9,
+    titleMarginBottom: 18,
+    headingMarginBottom: 18,
+    subtitleMarginBottom: 14,
+  },
+  "peach-soda": {
+    titleOffset: 5,
+    headingOffset: 3,
+    subtitleOffset: 1.5,
+    titleLineOffset: 10,
+    headingLineOffset: 9,
+    subtitleLineOffset: 9,
+    titleMarginBottom: 18,
+    headingMarginBottom: 18,
+    subtitleMarginBottom: 14,
+  },
+  "dopamine-collage": {
+    titleOffset: 5,
+    headingOffset: 3,
+    subtitleOffset: 1.5,
+    titleLineOffset: 10,
+    headingLineOffset: 9,
+    subtitleLineOffset: 9,
+    titleMarginBottom: 18,
+    headingMarginBottom: 18,
+    subtitleMarginBottom: 14,
+  },
 };
 
 function getThemeScale(themeId: ThemeId) {
@@ -586,6 +756,24 @@ function getTitleDecoration(themeId: ThemeId): Omit<
         paddingTop: 2,
         paddingLeft: 30,
       };
+    case "sunny-checker":
+      return {
+        ...emptyDecoration(),
+        paddingTop: 14,
+        paddingRight: 18,
+        paddingBottom: 14,
+        paddingLeft: 70,
+      };
+    case "blue-journal":
+    case "peach-soda":
+    case "dopamine-collage":
+      return {
+        ...emptyDecoration(),
+        paddingTop: 14,
+        paddingRight: 18,
+        paddingBottom: 14,
+        paddingLeft: 18,
+      };
     default:
       return emptyDecoration();
   }
@@ -597,7 +785,10 @@ function getHeadingColor(themeId: ThemeId, theme: ThemeConfig) {
     themeId === "alibaba" ||
     themeId === "turquoise-green" ||
     themeId === "rouge-red" ||
-    themeId === "cream-coffee"
+    themeId === "cream-coffee" ||
+    themeId === "blue-journal" ||
+    themeId === "peach-soda" ||
+    themeId === "dopamine-collage"
   ) {
     return "#ffffff";
   }
@@ -683,6 +874,50 @@ function getHeadingDecoration(themeId: ThemeId, theme: ThemeConfig): Omit<
     };
   }
 
+  if (themeId === "sunny-checker") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "#ffe16a",
+      paddingTop: 7,
+      paddingRight: 58,
+      paddingBottom: 8,
+      paddingLeft: 62,
+    };
+  }
+
+  if (themeId === "blue-journal") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "linear-gradient(135deg, #4c92e8 0%, #2e77d0 100%)",
+      paddingTop: 7,
+      paddingRight: 54,
+      paddingBottom: 8,
+      paddingLeft: 58,
+    };
+  }
+
+  if (themeId === "peach-soda") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "linear-gradient(135deg, #ff8f79 0%, #ffb37e 100%)",
+      paddingTop: 7,
+      paddingRight: 48,
+      paddingBottom: 8,
+      paddingLeft: 66,
+    };
+  }
+
+  if (themeId === "dopamine-collage") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "#1646b8",
+      paddingTop: 7,
+      paddingRight: 48,
+      paddingBottom: 8,
+      paddingLeft: 62,
+    };
+  }
+
   return emptyDecoration();
 }
 
@@ -763,6 +998,50 @@ function getSubtitleDecoration(themeId: ThemeId, theme: ThemeConfig): Omit<
       paddingRight: 16,
       paddingBottom: 10,
       paddingLeft: 44,
+    };
+  }
+
+  if (themeId === "sunny-checker") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "#ffffff",
+      paddingTop: 9,
+      paddingRight: 54,
+      paddingBottom: 9,
+      paddingLeft: 72,
+    };
+  }
+
+  if (themeId === "blue-journal") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "#ffffff",
+      paddingTop: 9,
+      paddingRight: 56,
+      paddingBottom: 9,
+      paddingLeft: 52,
+    };
+  }
+
+  if (themeId === "peach-soda") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "#e9fbf6",
+      paddingTop: 9,
+      paddingRight: 60,
+      paddingBottom: 9,
+      paddingLeft: 72,
+    };
+  }
+
+  if (themeId === "dopamine-collage") {
+    return {
+      ...emptyDecoration(),
+      backgroundColor: "#ff766d",
+      paddingTop: 9,
+      paddingRight: 64,
+      paddingBottom: 9,
+      paddingLeft: 52,
     };
   }
 
