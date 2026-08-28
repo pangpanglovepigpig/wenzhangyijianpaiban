@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "build": {
+    "env": {
+      "VITE_ENABLE_AI_DRAFT": "true"
+    }
+  },
+  "env": {
+    "DEEPSEEK_TIMEOUT_MS": "25000"
+  }
+}

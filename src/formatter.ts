@@ -206,7 +206,7 @@ export function stabilizeAiDraftBlocks(blocks: ContentBlock[], sourceText: strin
     mergeCharacterStyles(localStyle, aiStyleStream.styles[index]),
   );
 
-  return applyRuleBasedEmphasis(applyComparableStyles(localBlocks, mergedStyles));
+  return applyRuleBasedEmphasis(applyComparableStyles(localBlocks, mergedStyles, aiStyleStream.styles));
 }
 
 export function blocksToMarkdown(blocks: ContentBlock[]): string {
@@ -630,7 +630,11 @@ function mergeCharacterStyles(localStyle: CharacterStyle, aiStyle?: CharacterSty
   };
 }
 
-function applyComparableStyles(blocks: ContentBlock[], styles: CharacterStyle[]): ContentBlock[] {
+function applyComparableStyles(
+  blocks: ContentBlock[],
+  styles: CharacterStyle[],
+  aiStyles: CharacterStyle[],
+): ContentBlock[] {
   let styleOffset = 0;
 
   return blocks.map((block) => {
@@ -638,11 +642,16 @@ function applyComparableStyles(blocks: ContentBlock[], styles: CharacterStyle[])
 
     const blockStyleCount = getComparableTextLength(block.text);
     const blockStyles = styles.slice(styleOffset, styleOffset + blockStyleCount);
+    const aiBlockStyles = aiStyles.slice(styleOffset, styleOffset + blockStyleCount);
     styleOffset += blockStyleCount;
+
+    const effectiveStyles = aiBlockStyles.some((style) => style.color)
+      ? blockStyles.map((style, index) => ({ ...style, color: aiBlockStyles[index]?.color }))
+      : blockStyles;
 
     return {
       ...block,
-      segments: block.type === "p" ? createSegmentsFromComparableStyles(block.text, blockStyles) : undefined,
+      segments: block.type === "p" ? createSegmentsFromComparableStyles(block.text, effectiveStyles) : undefined,
     };
   });
 }
@@ -726,7 +735,7 @@ function shouldKeepInlineColor(
   if (coloredSegments >= maxInlineColorSegmentsPerBlock) return false;
   if (coloredChars + segmentLength > maxInlineColorCharsPerBlock) return false;
 
-  return scoreInlineColorCandidate(segmentText, segment.color) >= inlineColorScoreThreshold;
+  return true;
 }
 
 function isWholeSingleSentenceSegment(blockText: string, segmentText: string) {

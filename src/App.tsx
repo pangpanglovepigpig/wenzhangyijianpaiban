@@ -46,6 +46,7 @@ export function App() {
   const [styleSettings, setStyleSettings] = useState<CardStyleSettings>(DEFAULT_CARD_STYLE);
   const previewRequestRef = useRef(0);
   const draftRequestRef = useRef(0);
+  const draftAbortRef = useRef<AbortController | null>(null);
 
   const markdown = useMemo(() => blocksToMarkdown(blocks), [blocks]);
   const cardStyle = useMemo(() => resolveCardStyle(styleSettings), [styleSettings]);
@@ -61,6 +62,10 @@ export function App() {
       revokeImages(images);
     };
   }, [images]);
+
+  useEffect(() => {
+    return () => draftAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     if (!pages.length) {
@@ -111,6 +116,7 @@ export function App() {
   }, [blocks, cardStyle]);
 
   function formatSourceText() {
+    cancelDraftRequest();
     const nextBlocks = createBlocksFromText(sourceText);
     setBlocks(nextBlocks);
     setSelectedId(nextBlocks[0]?.id ?? null);
@@ -120,17 +126,21 @@ export function App() {
   }
 
   async function generateDraft() {
-    if (!ENABLE_AI_DRAFT) return;
+    if (!ENABLE_AI_DRAFT || isDraftGenerating || !sourceText.trim()) return;
 
+    cancelDraftRequest();
     const requestId = draftRequestRef.current + 1;
     draftRequestRef.current = requestId;
+    const controller = new AbortController();
+    draftAbortRef.current = controller;
+    const requestedText = sourceText;
     setIsDraftGenerating(true);
     setDraftError(null);
     setDraftNotice(null);
 
     try {
       const { generateDraftWithDeepSeek } = await import("./draftApi");
-      const result = await generateDraftWithDeepSeek(sourceText);
+      const result = await generateDraftWithDeepSeek(requestedText, controller.signal);
       if (draftRequestRef.current !== requestId) return;
 
       setBlocks(result.blocks);
@@ -139,15 +149,18 @@ export function App() {
       clearImages();
     } catch (error) {
       if (draftRequestRef.current !== requestId) return;
+      if (error instanceof Error && error.name === "AbortError") return;
       setDraftError(error instanceof Error ? error.message : "DeepSeek 生成失败，请稍后再试。");
     } finally {
       if (draftRequestRef.current === requestId) {
+        draftAbortRef.current = null;
         setIsDraftGenerating(false);
       }
     }
   }
 
   function updateBlock(id: string, patch: Partial<ContentBlock>) {
+    cancelDraftRequest();
     setBlocks((current) =>
       current.map((block) => {
         if (block.id !== id) return block;
@@ -178,6 +191,7 @@ export function App() {
   }
 
   function insertDividerAfter(id: string) {
+    cancelDraftRequest();
     const divider = makeBlock("hr");
     setBlocks((current) => {
       const index = current.findIndex((block) => block.id === id);
@@ -189,6 +203,7 @@ export function App() {
   }
 
   function insertTextBlockAfter(id: string) {
+    cancelDraftRequest();
     const textBlock = makeBlock("p", "新的内容段落");
     setBlocks((current) => {
       const index = current.findIndex((block) => block.id === id);
@@ -200,6 +215,7 @@ export function App() {
   }
 
   function removeBlock(id: string) {
+    cancelDraftRequest();
     setBlocks((current) => current.filter((block) => block.id !== id));
     if (selectedId === id) setSelectedId(null);
     clearImages();
@@ -218,6 +234,13 @@ export function App() {
     previewRequestRef.current += 1;
     setPreviewError(null);
     setImages([]);
+  }
+
+  function cancelDraftRequest() {
+    draftRequestRef.current += 1;
+    draftAbortRef.current?.abort();
+    draftAbortRef.current = null;
+    setIsDraftGenerating(false);
   }
 
   async function saveAllImages() {
@@ -255,7 +278,11 @@ export function App() {
                 排版文章
               </button>
               {ENABLE_AI_DRAFT && (
-                <button className="secondary-button" onClick={generateDraft} disabled={isDraftGenerating}>
+                <button
+                  className="secondary-button"
+                  onClick={generateDraft}
+                  disabled={isDraftGenerating || !sourceText.trim()}
+                >
                   <RefreshCcw size={18} />
                   {isDraftGenerating ? "AI生成中" : "生成初稿"}
                 </button>
@@ -267,6 +294,7 @@ export function App() {
             className="source-input"
             value={sourceText}
             onChange={(event) => {
+              cancelDraftRequest();
               setSourceText(event.target.value);
               if (ENABLE_AI_DRAFT) {
                 setDraftError(null);

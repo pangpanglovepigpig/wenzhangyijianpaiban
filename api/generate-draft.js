@@ -2,12 +2,13 @@ const DEEPSEEK_ENDPOINT = "https://api.deepseek.com/chat/completions";
 const DEFAULT_MODEL = "deepseek-v4-flash";
 const MAX_INPUT_LENGTH = 12000;
 const MAX_BLOCKS = 600;
-const DEFAULT_REQUEST_TIMEOUT_MS = 55000;
-const MAX_REQUEST_TIMEOUT_MS = 55000;
-const LOCAL_FALLBACK_NOTICE = "DeepSeek 暂时响应较慢，已用本地规则生成保留原文的初稿。";
-const SOURCE_REPAIR_NOTICE = "DeepSeek 返回内容未完整保留原文，已改用本地排版规则。";
-const SLOW_RESPONSE_ERROR =
-  "DeepSeek 当前响应较慢或繁忙，这次没有生成初稿。请稍后重试，或确认线上 DEEPSEEK_TIMEOUT_MS 已设为 55000 后重新部署。";
+const MAX_AI_STYLES = 14;
+const MIN_AI_QUOTE_LENGTH = 6;
+const MAX_AI_QUOTE_LENGTH = 60;
+const DEFAULT_REQUEST_TIMEOUT_MS = 25000;
+const MAX_REQUEST_TIMEOUT_MS = 25000;
+const LOCAL_FALLBACK_NOTICE = "AI 样式生成较慢或暂时不可用，已返回完整的本地排版。";
+const SLOW_RESPONSE_ERROR = "DeepSeek 当前响应较慢或繁忙，已使用本地排版。";
 const VALID_BLOCK_TYPES = new Set(["h1", "h2", "h3", "p", "hr"]);
 const VALID_COLORS = new Set(["red", "blue"]);
 const FALLBACKABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
@@ -82,31 +83,23 @@ export default async function handler(req, res) {
       return;
     }
 
-    let rawDraft;
+    const localDraft = createSourcePreservingDraft(text);
+    let blocks = sanitizeDraft(localDraft);
     let notice;
 
     try {
-      rawDraft = await requestDeepSeekDraft(text, apiKey);
+      const rawStyles = await requestDeepSeekStyles(text, apiKey);
+      blocks = applyStyleSuggestions(blocks, rawStyles.styles, text);
     } catch (error) {
-      if (!isFallbackableDeepSeekError(error) || !isLocalFallbackEnabled()) throw error;
-
-      rawDraft = createSourcePreservingDraft(text);
+      if (!isFallbackableDeepSeekError(error)) throw error;
       notice = LOCAL_FALLBACK_NOTICE;
     }
 
-    let blocks = sanitizeDraft(rawDraft);
-
-    if (!draftPreservesSource(blocks, text)) {
-      rawDraft = createSourcePreservingDraft(text);
-      blocks = sanitizeDraft(rawDraft);
-      notice = notice ?? SOURCE_REPAIR_NOTICE;
+    if (!blocks.length || !draftPreservesSource(blocks, text)) {
+      throw new Error("本地排版没有完整保留原文，请刷新后重试。");
     }
 
-    if (!blocks.length) {
-      throw new Error("DeepSeek 没有返回可用的初稿内容。");
-    }
-
-    sendJson(res, 200, notice ? { blocks, notice, fallback: true } : { blocks });
+    sendJson(res, 200, notice ? { blocks, notice } : { blocks });
   } catch (error) {
     sendJson(res, 502, {
       error: error instanceof Error ? error.message : "DeepSeek 生成失败，请稍后再试。",
@@ -114,7 +107,7 @@ export default async function handler(req, res) {
   }
 }
 
-async function requestDeepSeekDraft(text, apiKey) {
+async function requestDeepSeekStyles(text, apiKey) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), getRequestTimeoutMs());
 
@@ -132,38 +125,25 @@ async function requestDeepSeekDraft(text, apiKey) {
             role: "system",
             content: [
               "你是小红书图文排版助手，只返回严格 JSON，不要 Markdown，不要解释。",
-              "你的任务是把用户文章整理成适合多张小红书图片展示的结构化初稿，但只能排版，不能改文。",
-              "返回格式必须是：{\"blocks\":[{\"type\":\"h1|h2|h3|p|hr\",\"text\":\"...\",\"highlight\":false,\"underline\":false,\"segments\":[{\"text\":\"...\",\"bold\":true,\"color\":\"red|blue\"}]}]}。",
-              "type 只能是 h1、h2、h3、p、hr。hr 不需要 text、segments、highlight、underline。",
-              "所有非 hr 的 text 按返回顺序拼接后，必须与用户原文去除空行和分隔线后的文字完全一致。",
-              "严禁改写、删减、概括、扩写、调整文字顺序，严禁新增原文没有的小标题、总结句或过渡句。",
-              "text 必须等于 segments 中所有 text 拼接后的结果；segments 必须完整切分 text，不能漏掉空格或标点；没有局部样式时可以省略 segments。",
-              "highlight 和 underline 必须始终返回 false；黄色高亮和红色波浪线由本地排版规则统一处理。",
-              "第一行默认用 h1。",
-              "h3 只能用于原文中完整存在的结构句或短段，例如“第一个层次，是因为……。”；不确定就用 p。",
-              "普通正文按更细的信息块输出：同一部分可以有多个 p 段落，每个 p 通常 1 到 2 句，约 24 到 68 字；重要提醒句、方法句、结论句可以单独成段。",
-              "不同部分之间必须用 hr 分隔；hr 只表示部分边界，不要放在同一部分的每个 p 段落之间。",
-              "没有原文小标题时，也要按内容推进自然分成几个部分，每个部分可以包含多个 p 段落。",
-              "短到无法独立阅读的句子可以合并，超长句可以按逗号、冒号、顿号等软切分。",
-              "加粗用于核心结论、关键名词、重要数字、强观点，但必须来自原文原字。",
-              "红色用于一句提醒、风险、不要做、必须注意、常见错误等句段，不要执着固定关键词。",
-              "蓝色用于一句方法、结论、收益、行动建议、总结性判断等句段，不要执着固定关键词。",
-              "segments 主要用于 p 段落；h1、h2、h3 不要使用红色或蓝色。",
-              "每个段落最多 1 处红色或蓝色，每处约 6 到 60 个字，可以是一条完整句子，也可以包含句号、问号、叹号或分号。",
-              "避免把多个句子或很长整段染色；不确定就不标色，避免整段加粗或整段染色。",
-              "可以拆分长段、识别原文已有标题和小标题；可以返回必要的 hr 分隔线，但不要连续返回分隔线。",
+              "只挑选原文中适合加粗或标红蓝色的少量连续引用，不负责标题、分段、分隔线、黄色高亮或红色波浪线。",
+              "返回格式必须是：{\"styles\":[{\"quote\":\"原文中的连续文字\",\"bold\":true,\"color\":\"red|blue\"}]}。",
+              "styles 最多 14 条，建议 8 到 12 条；每条 quote 必须逐字复制原文中唯一出现的一段连续文字，长度 6 到 60 字。",
+              "quote 不能跨自然段，不能包含 Markdown 标题或分隔线，不能改写、删减、概括、补字或调整标点。",
+              "红色用于提醒、风险、不要做、必须注意和常见错误；蓝色用于方法、结论、收益、行动建议和总结性判断。",
+              "每个自然段最多选择一处；不确定就少选，不要选择整篇标题或小标题。",
+              "bold 只能是布尔值；color 只能是 red 或 blue。",
             ].join("\n"),
           },
           {
             role: "user",
-            content: `请为下面文章生成结构化初稿：\n\n${text}`,
+            content: `请只返回下面文章中的重点样式引用：\n\n${text}`,
           },
         ],
         response_format: { type: "json_object" },
         thinking: { type: "disabled" },
         stream: false,
-        temperature: 0.2,
-        max_tokens: getMaxTokensForText(text),
+        temperature: 0.1,
+        max_tokens: 1600,
       }),
       signal: controller.signal,
     });
@@ -172,7 +152,7 @@ async function requestDeepSeekDraft(text, apiKey) {
     if (!response.ok) {
       if (response.status === 429) {
         throw new DeepSeekRequestError(
-          "DeepSeek 当前请求过于频繁或额度受限，这次没有生成初稿。请稍后重试，或检查 DeepSeek 账户额度。",
+          "DeepSeek 当前请求过于频繁或额度受限，已使用本地排版。",
           true,
         );
       }
@@ -198,12 +178,12 @@ async function requestDeepSeekDraft(text, apiKey) {
       throw new DeepSeekRequestError("DeepSeek 返回内容被截断，这次没有生成初稿。请缩短原文后再试一次。", true);
     }
 
-    const draft = parseDraftContent(content);
-    if (!draft) {
-      throw new DeepSeekRequestError("DeepSeek 返回格式异常，这次没有生成初稿。请再试一次。", true);
+    const styles = parseStyleContent(content);
+    if (!styles) {
+      throw new DeepSeekRequestError("DeepSeek 返回格式异常，已使用本地排版。", true);
     }
 
-    return draft;
+    return styles;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new DeepSeekRequestError(SLOW_RESPONSE_ERROR, true);
@@ -226,22 +206,11 @@ function isFallbackableDeepSeekError(error) {
   return error instanceof DeepSeekRequestError && error.fallbackable === true;
 }
 
-function isLocalFallbackEnabled() {
-  return String(process.env.DEEPSEEK_ENABLE_LOCAL_FALLBACK || "").toLowerCase() === "true";
-}
-
 function getRequestTimeoutMs() {
   const configured = Number(process.env.DEEPSEEK_TIMEOUT_MS);
   if (!Number.isFinite(configured) || configured <= 0) return DEFAULT_REQUEST_TIMEOUT_MS;
 
   return Math.min(Math.max(configured, 10000), MAX_REQUEST_TIMEOUT_MS);
-}
-
-function getMaxTokensForText(text) {
-  if (text.length > 9000) return 18000;
-  if (text.length > 6000) return 14000;
-  if (text.length > 3000) return 9000;
-  return 5000;
 }
 
 function safeParseJson(value) {
@@ -252,14 +221,12 @@ function safeParseJson(value) {
   }
 }
 
-function parseDraftContent(content) {
+function parseStyleContent(content) {
   const parsed = parseJsonLoose(content);
   if (!parsed) return null;
-  if (Array.isArray(parsed)) return { blocks: parsed };
-  if (Array.isArray(parsed?.blocks)) return parsed;
-  if (Array.isArray(parsed?.data?.blocks)) return parsed.data;
-
-  return parsed;
+  if (Array.isArray(parsed?.styles)) return { styles: parsed.styles };
+  if (Array.isArray(parsed?.data?.styles)) return { styles: parsed.data.styles };
+  return null;
 }
 
 function parseJsonLoose(value) {
@@ -388,6 +355,68 @@ function sanitizeSegments(segments) {
     result.push(segment);
     return result;
   }, []);
+}
+
+function applyStyleSuggestions(blocks, rawStyles, sourceText) {
+  const nextBlocks = blocks.map((block) => ({
+    ...block,
+    segments: block.segments?.map((segment) => ({ ...segment })),
+  }));
+  if (!Array.isArray(rawStyles)) return nextBlocks;
+
+  const usedBlockIndexes = new Set();
+
+  rawStyles.slice(0, MAX_AI_STYLES).forEach((rawStyle) => {
+    if (!rawStyle || typeof rawStyle !== "object" || typeof rawStyle.quote !== "string") return;
+
+    const quote = rawStyle.quote.trim();
+    const quoteLength = getComparableTextLength(quote);
+    if (quoteLength < MIN_AI_QUOTE_LENGTH || quoteLength > MAX_AI_QUOTE_LENGTH) return;
+    if (countOccurrences(sourceText, quote) !== 1) return;
+    if (rawStyle.bold !== undefined && typeof rawStyle.bold !== "boolean") return;
+    if (rawStyle.color !== undefined && !VALID_COLORS.has(rawStyle.color)) return;
+
+    const bold = rawStyle.bold === true || undefined;
+    const color = VALID_COLORS.has(rawStyle.color) ? rawStyle.color : undefined;
+    if (!bold && !color) return;
+
+    const matchingBlockIndexes = nextBlocks.reduce((result, block, blockIndex) => {
+      if (block.type === "p" && block.text.includes(quote)) result.push(blockIndex);
+      return result;
+    }, []);
+    if (matchingBlockIndexes.length !== 1) return;
+
+    const blockIndex = matchingBlockIndexes[0];
+    if (usedBlockIndexes.has(blockIndex)) return;
+
+    const block = nextBlocks[blockIndex];
+    const quoteStart = block.text.indexOf(quote);
+    const quoteEnd = quoteStart + quote.length;
+    const segments = [];
+    if (quoteStart > 0) segments.push({ text: block.text.slice(0, quoteStart) });
+    segments.push({ text: quote, bold, color });
+    if (quoteEnd < block.text.length) segments.push({ text: block.text.slice(quoteEnd) });
+
+    block.segments = segments;
+    usedBlockIndexes.add(blockIndex);
+  });
+
+  return nextBlocks;
+}
+
+function countOccurrences(text, quote) {
+  let count = 0;
+  let cursor = 0;
+
+  while (cursor <= text.length - quote.length) {
+    const index = text.indexOf(quote, cursor);
+    if (index === -1) break;
+    count += 1;
+    if (count > 1) return count;
+    cursor = index + 1;
+  }
+
+  return count;
 }
 
 function sanitizeText(value) {
@@ -852,4 +881,4 @@ function hasProhibition(text) {
   return prohibitionPattern.test(String(text ?? "").replace(/能不能/g, ""));
 }
 
-export { createSourcePreservingDraft };
+export { applyStyleSuggestions, createSourcePreservingDraft, parseStyleContent };

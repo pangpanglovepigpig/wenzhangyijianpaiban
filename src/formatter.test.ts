@@ -240,6 +240,22 @@ describe("createBlocksFromText", () => {
     });
   });
 
+  test("keeps a structurally valid AI color even when local keywords would not select it", () => {
+    const source = "### 样式映射测试\n\n这一小段没有本地规则关键词，但模型判断它值得标蓝。";
+    const phrase = "这一小段没有本地规则关键词";
+    const aiBlocks = [
+      makeBlock("p", "样式映射测试"),
+      makeBlock("p", "这一小段没有本地规则关键词，但模型判断它值得标蓝。", false, false, [
+        { text: phrase, bold: true, color: "blue" },
+        { text: "，但模型判断它值得标蓝。" },
+      ]),
+    ];
+
+    const stabilized = stabilizeAiDraftBlocks(aiBlocks, source);
+    expect(stabilized.some((block) => block.segments?.some((segment) => segment.text === phrase && segment.color === "blue")))
+      .toBe(true);
+  });
+
   test("falls back to the source-derived structure when AI text cannot be mapped safely", () => {
     const localBlocks = createBlocksFromText(shenzhenArticle);
     const stabilized = stabilizeAiDraftBlocks([makeBlock("p", "被改写过的错误内容")], shenzhenArticle);

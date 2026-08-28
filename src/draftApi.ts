@@ -12,13 +12,14 @@ export type GenerateDraftResult = {
   notice?: string;
 };
 
-export async function generateDraftWithDeepSeek(text: string): Promise<GenerateDraftResult> {
+export async function generateDraftWithDeepSeek(text: string, signal?: AbortSignal): Promise<GenerateDraftResult> {
   const response = await fetch("/api/generate-draft", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ text }),
+    signal,
   });
 
   const data = (await response.json().catch(() => ({}))) as GenerateDraftResponse;
