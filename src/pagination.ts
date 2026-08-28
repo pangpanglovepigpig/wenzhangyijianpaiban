@@ -13,31 +13,80 @@ export function paginateBlocks(
   const pages: PageModel[] = [];
   let current: ContentBlock[] = [];
   let used = 0;
+  let index = 0;
 
-  blocks.forEach((block) => {
-    const height = measuredHeights.get(block.id) ?? fallbackHeight(block);
-    const startsPage = current.length === 0;
+  const flushPage = () => {
+    const pageBlocks = trimTrailingDivider(current);
+    if (pageBlocks.length) pages.push({ id: createId(), blocks: pageBlocks });
+    current = [];
+    used = 0;
+  };
 
-    if (!startsPage && used + height > cardStyle.contentHeight) {
-      const trailingDivider = current[current.length - 1]?.type === "hr" ? current[current.length - 1] : null;
-      const previousBlocks = trailingDivider ? current.slice(0, -1) : current;
-      if (previousBlocks.length > 0) {
-        pages.push({ id: createId(), blocks: previousBlocks });
+  while (index < blocks.length) {
+    const unit = getKeepTogetherUnit(blocks, index, measuredHeights, cardStyle.contentHeight);
+    const unitHeight = unit.reduce(
+      (total, block) => total + (measuredHeights.get(block.id) ?? fallbackHeight(block)),
+      0,
+    );
+
+    if (unit.length > 1) {
+      if (current.length && used + unitHeight > cardStyle.contentHeight) flushPage();
+      current.push(...unit);
+      used += unitHeight;
+      index += unit.length;
+      continue;
+    }
+
+    const block = unit[0];
+    const height = unitHeight;
+    if (current.length && used + height > cardStyle.contentHeight) {
+      const trailingDivider = current[current.length - 1]?.type === "hr" ? current.pop() ?? null : null;
+      flushPage();
+      if (trailingDivider) {
+        current.push(trailingDivider);
+        used += measuredHeights.get(trailingDivider.id) ?? fallbackHeight(trailingDivider);
       }
-      current = trailingDivider ? [trailingDivider, block] : [block];
-      used = (trailingDivider ? measuredHeights.get(trailingDivider.id) ?? fallbackHeight(trailingDivider) : 0) + height;
-      return;
     }
 
     current.push(block);
     used += height;
-  });
+    index += 1;
+  }
 
   if (current.length > 0) {
-    pages.push({ id: createId(), blocks: trimTrailingDivider(current) });
+    flushPage();
   }
 
   return pages.length ? pages : [{ id: createId(), blocks: [] }];
+}
+
+function getKeepTogetherUnit(
+  blocks: ContentBlock[],
+  index: number,
+  measuredHeights: Map<string, number>,
+  contentHeight: number,
+) {
+  const block = blocks[index];
+  const next = blocks[index + 1];
+  const afterNext = blocks[index + 2];
+  const candidateLengths: number[] = [];
+
+  if (block.type === "hr" && (next?.type === "h2" || next?.type === "h3") && afterNext?.type === "p") {
+    candidateLengths.push(3);
+  }
+  if (block.type === "hr" && next) candidateLengths.push(2);
+  if ((block.type === "h2" || block.type === "h3") && next?.type === "p") candidateLengths.push(2);
+
+  for (const length of candidateLengths) {
+    const candidate = blocks.slice(index, index + length);
+    const height = candidate.reduce(
+      (total, item) => total + (measuredHeights.get(item.id) ?? fallbackHeight(item)),
+      0,
+    );
+    if (height <= contentHeight) return candidate;
+  }
+
+  return [block];
 }
 
 function trimTrailingDivider(blocks: ContentBlock[]) {

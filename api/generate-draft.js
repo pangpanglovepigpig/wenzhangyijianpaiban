@@ -19,7 +19,7 @@ const sourceH3Pattern = /^(第[一二三四五六七八九十\d]+个层次[，,]
 const standaloneH3Pattern = /^([一二三四五六七八九十\d]+[、.．）)]|第[一二三四五六七八九十\d]+[步章节])[^\n。！？!?；;]{2,32}$/;
 const inlineColorCuePatterns = {
   red:
-    /(注意|提醒|不要|不能|避免|一定要|一定|必须|停止|正视|千万|尤其|小心|警惕|风险|误区|雷区|常见|错误|失败|后果|遗漏|截断|焦虑|粗心|瓶颈|恶性循环|自我否定|最可惜|最容易|降低|失去|变差|浪费|拖慢|出错|失控|检查|确认|排雷)/,
+    /(注意|提醒|不要|避免|一定要|一定|必须|停止|正视|千万|尤其|小心|警惕|风险|误区|雷区|常见|错误|失败|后果|遗漏|截断|焦虑|粗心|瓶颈|恶性循环|自我否定|最可惜|最容易|降低|失去|变差|浪费|拖慢|出错|失控|检查|确认|排雷)/,
   blue:
     /(方法|步骤|方案|建议|做法|行动|执行|结论|总结|核心|关键|重点|原则|清单|公式|路径|策略|工具|流程|解决|完成|拆成|搭建|先把|然后|最后|所以|因此|总之|一句话|简单说|也就是说|真正|适合|值得|可以|就能|即可|提升|优化|改善|效果|效率|增长|转化|复盘|获得|抓手)/,
 };
@@ -34,8 +34,20 @@ const infoBlockForcedMaxLength = 86;
 const infoBlockMaxUnits = 2;
 const longSentenceSplitLength = 78;
 const orphanInfoBlockMaxLength = 6;
-const implicitSectionMinParagraphs = 3;
-const implicitSectionMinChars = 150;
+const implicitSectionMinParagraphs = 2;
+const implicitSectionMinChars = 180;
+const implicitSectionOpeningPattern =
+  /^(真正|关键|核心|重点|结论|建议|方法|做法|解决|接下来|下一步|所以|因此|总之|最后|一句话|简单说|也就是说|具体做法|具体来说|注意|提醒|不要|不能|避免|必须|一定要|首先|其次|第一|第二|第三|另外|另一方面|换句话说)/;
+const implicitSectionPivotPattern =
+  /^(如果你(?:现在|目前|暂时)?还(?:拿不准|没想好|不确定)|如果你只是|如果[一二三四五六七八九十几\d]+(?:周|天|个月)下来|第[一二三四五六七八九十\d]+周结束时|说到底|归根结底|总的来说|最后想说|最后要说)/;
+const implicitSectionAdvicePattern = /(调整|判断|做法|方法|建议|解决|可以|应该|需要|先|再|步骤|原则|边界)/;
+const implicitSectionScenePattern = /(家长|学生|同事|领导|孩子|老师|消息|任务|拜托|撒娇|委屈|情绪|状态|场景|问题)/;
+const continuationOpeningPattern = /^(这些|这种|同时|也|还|而且|然后|后来|前面|刚开始|上面|这时候)/;
+const structuralHeadingOpeningPattern =
+  /^(先看|再看|接着看|然后才是|首先|其次|再次|最后(?:再)?看|最后(?:是|，|,|：|:)|第[一二三四五六七八九十\d]+笔账(?:是|：|:)|第[一二三四五六七八九十\d]+周可以从|资料选择(?:也)?要|计划不要|到了周末)/;
+const structuralHeadingMinLength = 6;
+const structuralHeadingMaxLength = 34;
+const prohibitionPattern = /(^不能|不能(?:把|只|让|靠|等|将|用|因为|为了|完全|仅|说|有)|不应|不该)/;
 const maxInlineColorLength = 60;
 const minInlineColorLength = 6;
 const inlineColorScoreThreshold = 5;
@@ -417,6 +429,7 @@ function draftPreservesSource(blocks, sourceText) {
 function getComparableSourceText(text) {
   return getSourceLines(text)
     .filter((line) => !markdownDividerPattern.test(line))
+    .map((line) => getFallbackMarkdownHeading(line)?.text ?? line)
     .join("")
     .replace(/\s/g, "");
 }
@@ -457,8 +470,7 @@ function createSourcePreservingDraft(text) {
 
   const blocks = [];
   let hasTitle = false;
-  let sectionParagraphCount = 0;
-  let sectionTextLength = 0;
+  let sectionParagraphTexts = [];
   const hasExplicitSections = lines.some((line, index) => {
     if (index === 0 || markdownDividerPattern.test(line.text)) return false;
     const markdownHeading = getFallbackMarkdownHeading(line.text);
@@ -466,8 +478,27 @@ function createSourcePreservingDraft(text) {
   });
 
   const resetSectionStats = () => {
-    sectionParagraphCount = 0;
-    sectionTextLength = 0;
+    sectionParagraphTexts = [];
+  };
+
+  const appendParagraphs = (content) => {
+    let addedParagraph = false;
+
+    splitIntoInfoBlocks(content).forEach((sentence) => {
+      if (blocks.length >= MAX_BLOCKS) return;
+
+      if (isSourceH3Candidate(sentence)) {
+        addFallbackDivider(blocks);
+        blocks.push(createFallbackBlock("h3", sentence));
+        resetSectionStats();
+        return;
+      }
+
+      blocks.push(createFallbackBlock("p", sentence, decorateFallbackSegments(sentence)));
+      addedParagraph = true;
+    });
+
+    if (addedParagraph) sectionParagraphTexts.push(content);
   };
 
   lines.forEach((line, index) => {
@@ -480,7 +511,8 @@ function createSourcePreservingDraft(text) {
     }
 
     if (!hasTitle) {
-      blocks.push(createFallbackBlock("h1", line.text));
+      const firstHeading = getFallbackMarkdownHeading(line.text);
+      blocks.push(createFallbackBlock("h1", firstHeading?.text ?? line.text));
       hasTitle = true;
       addFallbackDivider(blocks);
       resetSectionStats();
@@ -490,7 +522,7 @@ function createSourcePreservingDraft(text) {
     const markdownHeading = getFallbackMarkdownHeading(line.text);
     if (markdownHeading) {
       addFallbackDivider(blocks);
-      blocks.push(createFallbackBlock(markdownHeading.level === 2 ? "h2" : "h3", line.text));
+      blocks.push(createFallbackBlock(markdownHeading.level === 3 ? "h3" : "h2", markdownHeading.text));
       resetSectionStats();
       return;
     }
@@ -502,34 +534,21 @@ function createSourcePreservingDraft(text) {
       return;
     }
 
-    splitIntoInfoBlocks(line.text).forEach((sentence, paragraphIndex) => {
-      if (blocks.length < MAX_BLOCKS) {
-        if (isSourceH3Candidate(sentence)) {
-          addFallbackDivider(blocks);
-          blocks.push(createFallbackBlock("h3", sentence));
-          resetSectionStats();
-          return;
-        }
+    const structuralHeading = splitLeadingStructuralHeading(line.text);
+    if (structuralHeading) {
+      addFallbackDivider(blocks);
+      blocks.push(createFallbackBlock("h3", structuralHeading.heading));
+      resetSectionStats();
+      if (structuralHeading.remainder) appendParagraphs(structuralHeading.remainder);
+      return;
+    }
 
-        if (
-          shouldStartImplicitSection(
-            blocks,
-            hasExplicitSections,
-            line,
-            paragraphIndex,
-            sectionParagraphCount,
-            sectionTextLength,
-          )
-        ) {
-          addFallbackDivider(blocks);
-          resetSectionStats();
-        }
+    if (shouldStartImplicitSection(blocks, hasExplicitSections, line, sectionParagraphTexts)) {
+      addFallbackDivider(blocks);
+      resetSectionStats();
+    }
 
-        blocks.push(createFallbackBlock("p", sentence, decorateFallbackSegments(sentence)));
-        sectionParagraphCount += 1;
-        sectionTextLength += getComparableTextLength(sentence);
-      }
-    });
+    appendParagraphs(line.text);
   });
 
   return { blocks: compactDividers(blocks) };
@@ -542,6 +561,26 @@ function getFallbackMarkdownHeading(line) {
   return {
     level: match[1].length,
     text: match[2].trim(),
+  };
+}
+
+function splitLeadingStructuralHeading(line) {
+  const firstSentence = getSentenceRanges(line)[0];
+  if (!firstSentence || firstSentence.start !== 0) return null;
+
+  const heading = line.slice(firstSentence.start, firstSentence.end).trim();
+  const headingLength = getComparableTextLength(heading);
+  if (
+    headingLength < structuralHeadingMinLength ||
+    headingLength > structuralHeadingMaxLength ||
+    !structuralHeadingOpeningPattern.test(heading)
+  ) {
+    return null;
+  }
+
+  return {
+    heading,
+    remainder: line.slice(firstSentence.end).trim(),
   };
 }
 
@@ -661,18 +700,36 @@ function shouldStartImplicitSection(
   blocks,
   hasExplicitSections,
   line,
-  paragraphIndex,
-  sectionParagraphCount,
-  sectionTextLength,
+  sectionParagraphTexts,
 ) {
   if (hasExplicitSections) return false;
-  if (sectionParagraphCount === 0) return false;
+  if (!line.hasBlankBefore) return false;
+  if (sectionParagraphTexts.length === 0) return false;
   if (blocks[blocks.length - 1]?.type === "hr") return false;
+  if (implicitSectionPivotPattern.test(line.text)) return true;
 
-  const isSourceParagraphBoundary = paragraphIndex === 0 && line.hasBlankBefore;
-  if (isSourceParagraphBoundary && sectionParagraphCount >= 2) return true;
+  const sectionTextLength = sectionParagraphTexts.reduce(
+    (total, paragraphText) => total + getComparableTextLength(paragraphText),
+    0,
+  );
+  const hasEnoughContext =
+    sectionParagraphTexts.length >= implicitSectionMinParagraphs || sectionTextLength >= implicitSectionMinChars;
 
-  return sectionParagraphCount >= implicitSectionMinParagraphs || sectionTextLength >= implicitSectionMinChars;
+  return hasEnoughContext && scoreImplicitSectionShift(line.text, sectionParagraphTexts) >= 4;
+}
+
+function scoreImplicitSectionShift(currentText, previousTexts) {
+  const previousText = previousTexts.join("");
+  let score = 0;
+
+  if (implicitSectionPivotPattern.test(currentText)) score += 4;
+  if (implicitSectionOpeningPattern.test(currentText)) score += 4;
+  if (implicitSectionAdvicePattern.test(currentText)) score += 2;
+  if (implicitSectionScenePattern.test(previousText) && implicitSectionAdvicePattern.test(currentText)) score += 2;
+  if (/^(\d+[、.．）)]|[一二三四五六七八九十]+[、.．])/.test(currentText)) score += 4;
+  if (continuationOpeningPattern.test(currentText)) score -= 4;
+
+  return score;
 }
 
 function isSourceH3Candidate(sentence) {
@@ -771,6 +828,7 @@ function scoreInlineColorCandidate(text, color) {
   let score = 0;
 
   if (inlineColorCuePatterns[color].test(text)) score += 4;
+  if (color === "red" && hasProhibition(text)) score += 4;
   if (color === "red" && inlineRedActionPattern.test(text)) score += 2;
   if (color === "blue" && inlineBlueActionPattern.test(text)) score += 2;
   if (color === "blue" && summaryPattern.test(text)) score += 2;
@@ -779,6 +837,7 @@ function scoreInlineColorCandidate(text, color) {
     score += 2;
   }
   if (color === "red" && /(太多|过度|反而|否则|一旦|导致|失去|降低|变差)/.test(text)) score += 1;
+  if (color === "red" && /(不等于|不代表)/.test(text)) score += 2;
   if (color === "blue" && /(不是.+而是|只解决一个问题|一直在获得信息)/.test(text)) score += 1;
   if (length >= 12 && length <= 45) score += 1;
 
@@ -788,3 +847,9 @@ function scoreInlineColorCandidate(text, color) {
 function getComparableTextLength(text) {
   return Array.from(String(text ?? "").replace(/\s/g, "")).length;
 }
+
+function hasProhibition(text) {
+  return prohibitionPattern.test(String(text ?? "").replace(/能不能/g, ""));
+}
+
+export { createSourcePreservingDraft };

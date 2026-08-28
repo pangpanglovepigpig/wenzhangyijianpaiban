@@ -22,7 +22,7 @@ const endPunctuation = /[。！？!?；;，,、：:]$/;
 const highlightPattern =
   /(核心|关键|重点|结论|建议|原则|清单|公式|总结|一句话|真正|适合|值得|突破口|掌控感|排雷|提分|质的飞跃|前夜)/;
 const underlinePattern =
-  /(注意|提醒|不要|不能|避免|一定|必须|记得|别忘|千万|尤其|小心|风险|误区|雷区|检查|确认|遗漏|截断|错误|失败|后果|失去|降低|变差|出错|失控)/;
+  /(注意|提醒|不要|避免|一定|必须|记得|别忘|千万|尤其|小心|风险|误区|雷区|检查|确认|遗漏|截断|错误|失败|后果|失去|降低|变差|出错|失控)/;
 const summaryPattern =
   /(^所以|^因此|^总之|^一句话|^最后|^简单说|^也就是说|才是|就能|即可|更重要|更适合|更容易|更值得|更清楚|更稳定|更有效)/;
 const markdownDividerPattern = /^-{3,}$/;
@@ -34,7 +34,7 @@ const inlineColorStyles: Record<InlineColor, string> = {
 };
 const inlineColorCuePatterns: Record<InlineColor, RegExp> = {
   red:
-    /(注意|提醒|不要|不能|避免|一定要|一定|必须|停止|正视|千万|尤其|小心|警惕|风险|误区|雷区|常见|错误|失败|后果|遗漏|截断|焦虑|粗心|瓶颈|恶性循环|自我否定|最可惜|最容易|降低|失去|变差|浪费|拖慢|出错|失控|检查|确认|排雷)/,
+    /(注意|提醒|不要|避免|一定要|一定|必须|停止|正视|千万|尤其|小心|警惕|风险|误区|雷区|常见|错误|失败|后果|遗漏|截断|焦虑|粗心|瓶颈|恶性循环|自我否定|最可惜|最容易|降低|失去|变差|浪费|拖慢|出错|失控|检查|确认|排雷)/,
   blue:
     /(方法|步骤|方案|建议|做法|行动|执行|结论|总结|核心|关键|重点|原则|清单|公式|路径|策略|工具|流程|解决|完成|拆成|搭建|先把|然后|最后|所以|因此|总之|一句话|简单说|也就是说|真正|适合|值得|可以|就能|即可|提升|优化|改善|效果|效率|增长|转化|复盘|获得|抓手)/,
 };
@@ -53,9 +53,20 @@ const implicitSectionMinParagraphs = 2;
 const implicitSectionMinChars = 180;
 const implicitSectionOpeningPattern =
   /^(真正|关键|核心|重点|结论|建议|方法|做法|解决|接下来|下一步|所以|因此|总之|最后|一句话|简单说|也就是说|具体做法|具体来说|注意|提醒|不要|不能|避免|必须|一定要|首先|其次|第一|第二|第三|另外|另一方面|换句话说)/;
+const implicitSectionPivotPattern =
+  /^(如果你(?:现在|目前|暂时)?还(?:拿不准|没想好|不确定)|如果你只是|如果[一二三四五六七八九十几\d]+(?:周|天|个月)下来|第[一二三四五六七八九十\d]+周结束时|说到底|归根结底|总的来说|最后想说|最后要说)/;
 const implicitSectionAdvicePattern = /(调整|判断|做法|方法|建议|解决|可以|应该|需要|先|再|步骤|原则|边界)/;
 const implicitSectionScenePattern = /(家长|学生|同事|领导|孩子|老师|消息|任务|拜托|撒娇|委屈|情绪|状态|场景|问题)/;
 const continuationOpeningPattern = /^(这些|这种|同时|也|还|而且|然后|后来|前面|刚开始|上面|这时候)/;
+const structuralHeadingOpeningPattern =
+  /^(先看|再看|接着看|然后才是|首先|其次|再次|最后(?:再)?看|最后(?:是|，|,|：|:)|第[一二三四五六七八九十\d]+笔账(?:是|：|:)|第[一二三四五六七八九十\d]+周可以从|资料选择(?:也)?要|计划不要|到了周末)/;
+const structuralHeadingMinLength = 6;
+const structuralHeadingMaxLength = 34;
+const explicitStancePattern =
+  /(我先说我的看法|我的看法是|我认为|我的结论是|值得.{0,24}但不适合|不是给.+统一.+而是)/;
+const prohibitionPattern = /(^不能|不能(?:把|只|让|靠|等|将|用|因为|为了|完全|仅|说|有)|不应|不该)/;
+const maxArticleHighlights = 3;
+const maxArticleUnderlines = 3;
 const maxInlineColorLength = 60;
 const minInlineColorLength = 6;
 const maxInlineColorRatio = 0.86;
@@ -113,9 +124,8 @@ export function createBlocksFromText(input: string): ContentBlock[] {
 
     const markdownHeading = getMarkdownHeading(line.text);
     if (markdownHeading) {
-      if (markdownHeading.level === 1) {
-        if (hasTitle) addDividerIfNeeded(blocks);
-        blocks.push(makeBlock(hasTitle ? "h2" : "h1", markdownHeading.text));
+      if (!hasTitle) {
+        blocks.push(makeBlock("h1", markdownHeading.text));
         hasTitle = true;
         resetSectionStats();
         return;
@@ -123,7 +133,7 @@ export function createBlocksFromText(input: string): ContentBlock[] {
 
       addDividerAfterTitleIfNeeded(blocks);
       addDividerIfNeeded(blocks);
-      blocks.push(makeBlock(markdownHeading.level === 2 ? "h2" : "h3", markdownHeading.text));
+      blocks.push(makeBlock(markdownHeading.level === 3 ? "h3" : "h2", markdownHeading.text));
       resetSectionStats();
       return;
     }
@@ -147,6 +157,21 @@ export function createBlocksFromText(input: string): ContentBlock[] {
       return;
     }
 
+    const structuralHeading = splitLeadingStructuralHeading(line.text);
+    if (structuralHeading) {
+      addDividerIfNeeded(blocks);
+      blocks.push(makeBlock("h3", structuralHeading.heading));
+      resetSectionStats();
+
+      if (structuralHeading.remainder) {
+        splitIntoInfoBlocks(structuralHeading.remainder).forEach((paragraph) => {
+          blocks.push(makeBlock("p", paragraph, false, false, createRuleBasedSegments(paragraph, "p")));
+        });
+        sectionParagraphTexts.push(structuralHeading.remainder);
+      }
+      return;
+    }
+
     if (shouldStartImplicitSection(blocks, hasExplicitSections, line, sectionParagraphTexts)) {
       addDividerIfNeeded(blocks);
       resetSectionStats();
@@ -165,37 +190,23 @@ export function createBlocksFromText(input: string): ContentBlock[] {
   return applyRuleBasedEmphasis(compactDividers(blocks));
 }
 
-export function stabilizeAiDraftBlocks(blocks: ContentBlock[]): ContentBlock[] {
-  const normalizedBlocks = blocks
+export function stabilizeAiDraftBlocks(blocks: ContentBlock[], sourceText: string): ContentBlock[] {
+  const localBlocks = createBlocksFromText(sourceText);
+  const normalizedAiBlocks = blocks
     .map(prepareAiDraftBlock)
-    .filter((block) => block.type === "hr" || block.text.trim().length > 0);
+    .filter((block) => block.type !== "hr" && block.text.trim().length > 0);
+  const localStyleStream = createComparableStyleStream(localBlocks);
+  const aiStyleStream = createComparableStyleStream(normalizedAiBlocks);
 
-  const firstTextBlock = normalizedBlocks.find((block) => block.type !== "hr");
-  if (firstTextBlock && !normalizedBlocks.some((block) => block.type === "h1")) {
-    firstTextBlock.type = "h1";
-    firstTextBlock.highlight = false;
-    firstTextBlock.underline = false;
+  if (!localStyleStream.text || localStyleStream.text !== aiStyleStream.text) {
+    return localBlocks;
   }
 
-  const structuredBlocks: ContentBlock[] = [];
-  normalizedBlocks.forEach((block) => {
-    if (block.type === "hr") {
-      addDividerIfNeeded(structuredBlocks);
-      return;
-    }
+  const mergedStyles = localStyleStream.styles.map((localStyle, index) =>
+    mergeCharacterStyles(localStyle, aiStyleStream.styles[index]),
+  );
 
-    if (block.type === "h2" || block.type === "h3") {
-      addDividerIfNeeded(structuredBlocks);
-    }
-
-    structuredBlocks.push(block);
-
-    if (block.type === "h1") {
-      addDividerAfterTitleIfNeeded(structuredBlocks);
-    }
-  });
-
-  return applyRuleBasedEmphasis(compactDividers(structuredBlocks));
+  return applyRuleBasedEmphasis(applyComparableStyles(localBlocks, mergedStyles));
 }
 
 export function blocksToMarkdown(blocks: ContentBlock[]): string {
@@ -355,6 +366,26 @@ function getMarkdownHeading(line: string) {
   };
 }
 
+function splitLeadingStructuralHeading(line: string) {
+  const firstSentence = getSentenceRanges(line)[0];
+  if (!firstSentence || firstSentence.start !== 0) return null;
+
+  const heading = line.slice(firstSentence.start, firstSentence.end).trim();
+  const headingLength = getComparableTextLength(heading);
+  if (
+    headingLength < structuralHeadingMinLength ||
+    headingLength > structuralHeadingMaxLength ||
+    !structuralHeadingOpeningPattern.test(heading)
+  ) {
+    return null;
+  }
+
+  return {
+    heading,
+    remainder: line.slice(firstSentence.end).trim(),
+  };
+}
+
 type TextRange = {
   start: number;
   end: number;
@@ -476,6 +507,7 @@ function shouldStartImplicitSection(
   if (!line.hasBlankBefore) return false;
   if (sectionParagraphTexts.length === 0) return false;
   if (blocks[blocks.length - 1]?.type === "hr") return false;
+  if (implicitSectionPivotPattern.test(line.text)) return true;
 
   const sectionTextLength = sectionParagraphTexts.reduce((total, text) => total + getComparableTextLength(text), 0);
   const hasEnoughContext =
@@ -488,6 +520,7 @@ function scoreImplicitSectionShift(currentText: string, previousTexts: string[])
   const previousText = previousTexts.join("");
   let score = 0;
 
+  if (implicitSectionPivotPattern.test(currentText)) score += 4;
   if (implicitSectionOpeningPattern.test(currentText)) score += 4;
   if (implicitSectionAdvicePattern.test(currentText)) score += 2;
   if (implicitSectionScenePattern.test(previousText) && implicitSectionAdvicePattern.test(currentText)) score += 2;
@@ -497,33 +530,12 @@ function scoreImplicitSectionShift(currentText: string, previousTexts: string[])
   return score;
 }
 
-function chooseBestIndexExcept(
-  sentences: string[],
-  scorer: (sentence: string, index: number, total: number) => number,
-  threshold: number,
-  excludedIndex: number,
-) {
-  let bestIndex = -1;
-  let bestScore = Number.NEGATIVE_INFINITY;
-
-  sentences.forEach((sentence, index) => {
-    if (index === excludedIndex) return;
-
-    const score = scorer(sentence, index, sentences.length);
-    if (score > bestScore || (score === bestScore && index === sentences.length - 1)) {
-      bestIndex = index;
-      bestScore = score;
-    }
-  });
-
-  return bestScore >= threshold ? bestIndex : -1;
-}
-
 function scoreHighlightSentence(sentence: string, index: number, total: number) {
   let score = 0;
   const isFirstOrLast = index === 0 || index === total - 1;
 
   if (isFirstOrLast && total > 1) score += 2;
+  if (explicitStancePattern.test(sentence)) score += 5;
   if (highlightPattern.test(sentence)) score += 2;
   if (summaryPattern.test(sentence)) score += 2;
   if (/\d+(\.\d+)?\s*(%|倍|个|条|步|天|分钟|小时|元)/.test(sentence)) score += 2;
@@ -538,7 +550,9 @@ function scoreUnderlineSentence(sentence: string, index: number, total: number) 
   const isFirstOrLast = index === 0 || index === total - 1;
 
   if (underlinePattern.test(sentence)) score += 4;
+  if (hasProhibition(sentence)) score += 4;
   if (inlineRedActionPattern.test(sentence)) score += 2;
+  if (/(不等于|不代表)/.test(sentence)) score += 2;
   if (/(太多|过度|反而|否则|一旦|导致|失去|降低|变差|出错|失控)/.test(sentence)) score += 2;
   if (isFirstOrLast && total > 1) score += 1;
   if (sentence.length >= 8 && sentence.length <= 80) score += 1;
@@ -580,6 +594,71 @@ function compactDividers(blocks: ContentBlock[]): ContentBlock[] {
     if (block.type !== "hr") return true;
     return index > 0 && index < all.length - 1;
   });
+}
+
+type CharacterStyle = Pick<TextSegment, "bold" | "color">;
+
+type ComparableStyleStream = {
+  text: string;
+  styles: CharacterStyle[];
+};
+
+function createComparableStyleStream(blocks: ContentBlock[]): ComparableStyleStream {
+  const characters: string[] = [];
+  const styles: CharacterStyle[] = [];
+
+  blocks.forEach((block) => {
+    if (block.type === "hr") return;
+
+    const segments = normalizeTextSegments(block.segments) ?? [{ text: block.text }];
+    segments.forEach((segment) => {
+      Array.from(segment.text).forEach((character) => {
+        if (/\s/.test(character)) return;
+        characters.push(character);
+        styles.push({ bold: segment.bold, color: segment.color });
+      });
+    });
+  });
+
+  return { text: characters.join(""), styles };
+}
+
+function mergeCharacterStyles(localStyle: CharacterStyle, aiStyle?: CharacterStyle): CharacterStyle {
+  return {
+    bold: aiStyle?.bold ?? localStyle.bold,
+    color: aiStyle?.color ?? localStyle.color,
+  };
+}
+
+function applyComparableStyles(blocks: ContentBlock[], styles: CharacterStyle[]): ContentBlock[] {
+  let styleOffset = 0;
+
+  return blocks.map((block) => {
+    if (block.type === "hr") return block;
+
+    const blockStyleCount = getComparableTextLength(block.text);
+    const blockStyles = styles.slice(styleOffset, styleOffset + blockStyleCount);
+    styleOffset += blockStyleCount;
+
+    return {
+      ...block,
+      segments: block.type === "p" ? createSegmentsFromComparableStyles(block.text, blockStyles) : undefined,
+    };
+  });
+}
+
+function createSegmentsFromComparableStyles(text: string, styles: CharacterStyle[]): TextSegment[] | undefined {
+  let styleIndex = 0;
+  const characterSegments = Array.from(text).map((character): TextSegment => {
+    if (/\s/.test(character)) return { text: character };
+
+    const style = styles[styleIndex] ?? {};
+    styleIndex += 1;
+    return { text: character, bold: style.bold, color: style.color };
+  });
+  const normalized = normalizeTextSegments(characterSegments);
+
+  return normalized?.some((segment) => segment.bold || segment.color) ? normalized : undefined;
 }
 
 function prepareAiDraftBlock(block: ContentBlock): ContentBlock {
@@ -662,43 +741,91 @@ function getComparableTextLength(text: string) {
   return Array.from(getComparableText(text)).length;
 }
 
+function hasProhibition(text: string) {
+  return prohibitionPattern.test(text.replace(/能不能/g, ""));
+}
+
+type EmphasisCandidate = {
+  blockIndex: number;
+  score: number;
+};
+
 function applyRuleBasedEmphasis(blocks: ContentBlock[]): ContentBlock[] {
   const emphasizedBlocks = blocks.map((block) => ({
     ...block,
     highlight: false,
     underline: false,
   }));
-  let paragraphIndexes: number[] = [];
+  const paragraphGroups = getParagraphGroups(emphasizedBlocks);
+  const underlineCandidates = chooseEmphasisCandidates(
+    emphasizedBlocks,
+    paragraphGroups,
+    scoreUnderlineSentence,
+    4,
+    new Set(),
+  ).slice(0, maxArticleUnderlines);
+  const underlinedIndexes = new Set(underlineCandidates.map((candidate) => candidate.blockIndex));
+  const highlightCandidates = chooseEmphasisCandidates(
+    emphasizedBlocks,
+    paragraphGroups,
+    scoreHighlightSentence,
+    3,
+    underlinedIndexes,
+  ).slice(0, maxArticleHighlights);
 
-  const flushParagraphGroup = () => {
-    if (!paragraphIndexes.length) return;
+  underlineCandidates.forEach(({ blockIndex }) => {
+    emphasizedBlocks[blockIndex].underline = true;
+  });
+  highlightCandidates.forEach(({ blockIndex }) => {
+    emphasizedBlocks[blockIndex].highlight = true;
+  });
 
-    const sentences = paragraphIndexes.map((blockIndex) => emphasizedBlocks[blockIndex].text);
-    const underlineIndex = chooseBestIndexExcept(sentences, scoreUnderlineSentence, 4, -1);
-    const highlightIndex = chooseBestIndexExcept(sentences, scoreHighlightSentence, 3, underlineIndex);
+  return emphasizedBlocks;
+}
 
-    if (underlineIndex >= 0) {
-      emphasizedBlocks[paragraphIndexes[underlineIndex]].underline = true;
-    }
+function getParagraphGroups(blocks: ContentBlock[]) {
+  const groups: number[][] = [];
+  let current: number[] = [];
 
-    if (highlightIndex >= 0) {
-      emphasizedBlocks[paragraphIndexes[highlightIndex]].highlight = true;
-    }
-
-    paragraphIndexes = [];
-  };
-
-  emphasizedBlocks.forEach((block, index) => {
+  blocks.forEach((block, index) => {
     if (block.type === "p") {
-      paragraphIndexes.push(index);
+      current.push(index);
       return;
     }
 
-    flushParagraphGroup();
+    if (current.length) groups.push(current);
+    current = [];
   });
-  flushParagraphGroup();
 
-  return emphasizedBlocks;
+  if (current.length) groups.push(current);
+  return groups;
+}
+
+function chooseEmphasisCandidates(
+  blocks: ContentBlock[],
+  paragraphGroups: number[][],
+  scorer: (sentence: string, index: number, total: number) => number,
+  threshold: number,
+  excludedIndexes: Set<number>,
+) {
+  return paragraphGroups
+    .map((group): EmphasisCandidate | null => {
+      let best: EmphasisCandidate | null = null;
+
+      for (let index = 0; index < group.length; index += 1) {
+        const blockIndex = group[index];
+        if (excludedIndexes.has(blockIndex)) continue;
+
+        const score = scorer(blocks[blockIndex].text, index, group.length);
+        if (!best || score > best.score || (score === best.score && index === group.length - 1)) {
+          best = { blockIndex, score };
+        }
+      }
+
+      return best && best.score >= threshold ? best : null;
+    })
+    .filter((candidate): candidate is EmphasisCandidate => candidate !== null)
+    .sort((a, b) => b.score - a.score || a.blockIndex - b.blockIndex);
 }
 
 type StyledRange = {
@@ -785,6 +912,7 @@ function scoreInlineColorCandidate(text: string, color: InlineColor) {
   let score = 0;
 
   if (inlineColorCuePatterns[color].test(text)) score += 4;
+  if (color === "red" && hasProhibition(text)) score += 4;
   if (color === "red" && inlineRedActionPattern.test(text)) score += 2;
   if (color === "blue" && inlineBlueActionPattern.test(text)) score += 2;
   if (color === "blue" && summaryPattern.test(text)) score += 2;
@@ -793,6 +921,7 @@ function scoreInlineColorCandidate(text: string, color: InlineColor) {
     score += 2;
   }
   if (color === "red" && /(太多|过度|反而|否则|一旦|导致|失去|降低|变差)/.test(text)) score += 1;
+  if (color === "red" && /(不等于|不代表)/.test(text)) score += 2;
   if (color === "blue" && /(不是.+而是|只解决一个问题|一直在获得信息)/.test(text)) score += 1;
   if (length >= 12 && length <= 45) score += 1;
 

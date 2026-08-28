@@ -42,7 +42,7 @@ export async function generateDraftWithDeepSeek(text: string): Promise<GenerateD
   );
 
   return {
-    blocks: stabilizeAiDraftBlocks(draftBlocks),
+    blocks: stabilizeAiDraftBlocks(draftBlocks, text),
     notice: data.notice,
   };
 }
