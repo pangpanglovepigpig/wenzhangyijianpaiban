@@ -60,8 +60,10 @@ const implicitSectionScenePattern = /(家长|学生|同事|领导|孩子|老师|
 const continuationOpeningPattern = /^(这些|这种|同时|也|还|而且|然后|后来|前面|刚开始|上面|这时候)/;
 const structuralHeadingOpeningPattern =
   /^(先看|再看|接着看|然后才是|首先|其次|再次|最后(?:再)?看|最后(?:是|，|,|：|:)|第[一二三四五六七八九十\d]+笔账(?:是|：|:)|第[一二三四五六七八九十\d]+周可以从|资料选择(?:也)?要|计划不要|到了周末)/;
+const numberedMatterOpeningPattern = /^(?:提前准备的)?第([一二三四五六七八九十\d]+)件事[，,:：]/;
 const structuralHeadingMinLength = 6;
 const structuralHeadingMaxLength = 34;
+const numberedMatterHeadingMaxLength = 40;
 const explicitStancePattern =
   /(我先说我的看法|我的看法是|我认为|我的结论是|值得.{0,24}但不适合|不是给.+统一.+而是)/;
 const prohibitionPattern = /(^不能|不能(?:把|只|让|靠|等|将|用|因为|为了|完全|仅|说|有)|不应|不该)/;
@@ -73,6 +75,11 @@ const maxInlineColorRatio = 0.86;
 const maxInlineColorSegmentsPerBlock = 1;
 const maxInlineColorCharsPerBlock = 60;
 const inlineColorScoreThreshold = 5;
+const maxAiAddedH3 = 6;
+const maxAiAddedSections = 3;
+const minAiStructureQuoteLength = 6;
+const maxAiStructureQuoteLength = 60;
+const unsafeAiH3OpeningPattern = /^(我先说|我认为|我觉得|我的看法|很多人|有些人|有人|如果|所以|因此|总之)/;
 
 type TextLine = {
   text: string;
@@ -105,6 +112,7 @@ export function createBlocksFromText(input: string): ContentBlock[] {
   const blocks: ContentBlock[] = [];
   let hasTitle = false;
   let sectionParagraphTexts: string[] = [];
+  const numberedMatterHeadingLines = getOrderedNumberedMatterHeadingLines(lines);
   const hasExplicitSections = lines.some((line, index) => {
     if (index === 0 || markdownDividerPattern.test(line.text)) return false;
     const markdownHeading = getMarkdownHeading(line.text);
@@ -157,7 +165,7 @@ export function createBlocksFromText(input: string): ContentBlock[] {
       return;
     }
 
-    const structuralHeading = splitLeadingStructuralHeading(line.text);
+    const structuralHeading = splitLeadingStructuralHeading(line.text, numberedMatterHeadingLines.has(line.text));
     if (structuralHeading) {
       addDividerIfNeeded(blocks);
       blocks.push(makeBlock("h3", structuralHeading.heading));
@@ -192,9 +200,11 @@ export function createBlocksFromText(input: string): ContentBlock[] {
 
 export function stabilizeAiDraftBlocks(blocks: ContentBlock[], sourceText: string): ContentBlock[] {
   const localBlocks = createBlocksFromText(sourceText);
-  const normalizedAiBlocks = blocks
-    .map(prepareAiDraftBlock)
-    .filter((block) => block.type !== "hr" && block.text.trim().length > 0);
+  const normalizedAiBlocks = compactDividers(
+    blocks
+      .map(prepareAiDraftBlock)
+      .filter((block) => block.type === "hr" || block.text.trim().length > 0),
+  );
   const localStyleStream = createComparableStyleStream(localBlocks);
   const aiStyleStream = createComparableStyleStream(normalizedAiBlocks);
 
@@ -205,8 +215,144 @@ export function stabilizeAiDraftBlocks(blocks: ContentBlock[], sourceText: strin
   const mergedStyles = localStyleStream.styles.map((localStyle, index) =>
     mergeCharacterStyles(localStyle, aiStyleStream.styles[index]),
   );
+  const structureBlocks = isSafeAiStructure(normalizedAiBlocks, localBlocks, sourceText)
+    ? normalizedAiBlocks
+    : localBlocks;
 
-  return applyRuleBasedEmphasis(applyComparableStyles(localBlocks, mergedStyles, aiStyleStream.styles));
+  return applyRuleBasedEmphasis(applyComparableStyles(structureBlocks, mergedStyles, aiStyleStream.styles));
+}
+
+function isSafeAiStructure(aiBlocks: ContentBlock[], localBlocks: ContentBlock[], sourceText: string) {
+  const aiTextBlocks = aiBlocks.filter((block) => block.type !== "hr");
+  const localHeadingCounts = getHeadingSignatureCounts(localBlocks);
+  const aiHeadingCounts = getHeadingSignatureCounts(aiBlocks);
+  const localH3Texts = new Set(localBlocks.filter((block) => block.type === "h3").map((block) => block.text));
+  const safeOpenings = getSafeSourceParagraphOpenings(sourceText);
+  const addedH3Blocks = aiBlocks.filter((block) => block.type === "h3" && !localH3Texts.has(block.text));
+
+  if (aiTextBlocks[0]?.type !== "h1" || aiTextBlocks.filter((block) => block.type === "h1").length !== 1) {
+    return false;
+  }
+  if (addedH3Blocks.length > maxAiAddedH3) return false;
+  if (aiBlocks.some((block, index) => block.type === "h3" && aiBlocks[index - 1]?.type !== "hr")) return false;
+  if (
+    addedH3Blocks.some(
+      (block) =>
+        !safeOpenings.has(block.text) || /[？?]$/.test(block.text) || unsafeAiH3OpeningPattern.test(block.text),
+    )
+  ) {
+    return false;
+  }
+  if ([...aiHeadingCounts.keys()].some((signature) => signature.startsWith("h2\u0000") && !localHeadingCounts.has(signature))) {
+    return false;
+  }
+  if ([...localHeadingCounts].some(([signature, count]) => (aiHeadingCounts.get(signature) ?? 0) < count)) {
+    return false;
+  }
+
+  const localDividerOffsets = getDividerOffsets(localBlocks);
+  const aiDividerOffsets = getDividerOffsets(aiBlocks);
+  if ([...localDividerOffsets].some((offset) => !aiDividerOffsets.has(offset))) return false;
+
+  const addedDividerOffsets = [...aiDividerOffsets].filter((offset) => !localDividerOffsets.has(offset));
+  const addedH3Offsets = getTextBlockOffsets(aiBlocks, (block) =>
+    block.type === "h3" && !localH3Texts.has(block.text),
+  );
+  const sectionOnlyOffsets = addedDividerOffsets.filter((offset) => !addedH3Offsets.has(offset));
+  if (sectionOnlyOffsets.length > maxAiAddedSections) return false;
+
+  return aiBlocks.every((block, index) => {
+    if (block.type !== "hr") return true;
+    const offset = getComparableOffsetBeforeBlock(aiBlocks, index);
+    if (localDividerOffsets.has(offset)) return true;
+
+    const nextBlock = aiBlocks.slice(index + 1).find((candidate) => candidate.type !== "hr");
+    return Boolean(nextBlock && [...safeOpenings].some((opening) => nextBlock.text.startsWith(opening)));
+  });
+}
+
+function getHeadingSignatureCounts(blocks: ContentBlock[]) {
+  return blocks.reduce<Map<string, number>>((counts, block) => {
+    if (block.type !== "h1" && block.type !== "h2" && block.type !== "h3") return counts;
+    const signature = `${block.type}\u0000${block.text}`;
+    counts.set(signature, (counts.get(signature) ?? 0) + 1);
+    return counts;
+  }, new Map());
+}
+
+function getSafeSourceParagraphOpenings(sourceText: string) {
+  return getTextLines(sourceText).reduce<Set<string>>((openings, line, index) => {
+    if (
+      index === 0 ||
+      !line.hasBlankBefore ||
+      markdownDividerPattern.test(line.text) ||
+      getMarkdownHeading(line.text)
+    ) {
+      return openings;
+    }
+
+    const firstSentence = getSentenceRanges(line.text)[0];
+    if (!firstSentence || firstSentence.start !== 0) return openings;
+    const quote = line.text.slice(firstSentence.start, firstSentence.end).trim();
+    const quoteLength = getComparableTextLength(quote);
+    if (
+      quoteLength >= minAiStructureQuoteLength &&
+      quoteLength <= maxAiStructureQuoteLength &&
+      countExactOccurrences(sourceText, quote) === 1
+    ) {
+      openings.add(quote);
+    }
+    return openings;
+  }, new Set());
+}
+
+function getDividerOffsets(blocks: ContentBlock[]) {
+  const offsets = new Set<number>();
+  let offset = 0;
+
+  blocks.forEach((block) => {
+    if (block.type === "hr") {
+      offsets.add(offset);
+      return;
+    }
+    offset += getComparableTextLength(block.text);
+  });
+
+  return offsets;
+}
+
+function getTextBlockOffsets(blocks: ContentBlock[], predicate: (block: ContentBlock) => boolean) {
+  const offsets = new Set<number>();
+  let offset = 0;
+
+  blocks.forEach((block) => {
+    if (block.type === "hr") return;
+    if (predicate(block)) offsets.add(offset);
+    offset += getComparableTextLength(block.text);
+  });
+
+  return offsets;
+}
+
+function getComparableOffsetBeforeBlock(blocks: ContentBlock[], blockIndex: number) {
+  return blocks.slice(0, blockIndex).reduce((offset, block) => {
+    return offset + (block.type === "hr" ? 0 : getComparableTextLength(block.text));
+  }, 0);
+}
+
+function countExactOccurrences(text: string, quote: string) {
+  let count = 0;
+  let cursor = 0;
+
+  while (cursor <= text.length - quote.length) {
+    const index = text.indexOf(quote, cursor);
+    if (index === -1) break;
+    count += 1;
+    if (count > 1) return count;
+    cursor = index + 1;
+  }
+
+  return count;
 }
 
 export function blocksToMarkdown(blocks: ContentBlock[]): string {
@@ -366,16 +512,17 @@ function getMarkdownHeading(line: string) {
   };
 }
 
-function splitLeadingStructuralHeading(line: string) {
+function splitLeadingStructuralHeading(line: string, allowNumberedMatter = false) {
   const firstSentence = getSentenceRanges(line)[0];
   if (!firstSentence || firstSentence.start !== 0) return null;
 
   const heading = line.slice(firstSentence.start, firstSentence.end).trim();
   const headingLength = getComparableTextLength(heading);
+  const isNumberedMatter = allowNumberedMatter && numberedMatterOpeningPattern.test(heading);
   if (
     headingLength < structuralHeadingMinLength ||
-    headingLength > structuralHeadingMaxLength ||
-    !structuralHeadingOpeningPattern.test(heading)
+    headingLength > (isNumberedMatter ? numberedMatterHeadingMaxLength : structuralHeadingMaxLength) ||
+    (!isNumberedMatter && !structuralHeadingOpeningPattern.test(heading))
   ) {
     return null;
   }
@@ -384,6 +531,56 @@ function splitLeadingStructuralHeading(line: string) {
     heading,
     remainder: line.slice(firstSentence.end).trim(),
   };
+}
+
+function getOrderedNumberedMatterHeadingLines(lines: TextLine[]) {
+  const candidates = lines
+    .slice(1)
+    .map((line) => ({ line: line.text, ordinal: getNumberedMatterOrdinal(line.text) }))
+    .filter((candidate): candidate is { line: string; ordinal: number } => candidate.ordinal !== null);
+  const approvedLines = new Set<string>();
+  let run: typeof candidates = [];
+
+  const approveRun = () => {
+    if (run.length >= 2) run.forEach((candidate) => approvedLines.add(candidate.line));
+  };
+
+  candidates.forEach((candidate) => {
+    if (!run.length || candidate.ordinal === run[run.length - 1].ordinal + 1) {
+      run.push(candidate);
+      return;
+    }
+
+    approveRun();
+    run = [candidate];
+  });
+  approveRun();
+
+  return approvedLines;
+}
+
+function getNumberedMatterOrdinal(text: string): number | null {
+  const match = numberedMatterOpeningPattern.exec(text);
+  if (!match) return null;
+
+  if (/^\d+$/.test(match[1])) {
+    const value = Number(match[1]);
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+
+  const digitValues: Record<string, number> = {
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
+  };
+  return digitValues[match[1]] ?? null;
 }
 
 type TextRange = {

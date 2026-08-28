@@ -3,14 +3,18 @@ const DEFAULT_MODEL = "deepseek-v4-flash";
 const MAX_INPUT_LENGTH = 12000;
 const MAX_BLOCKS = 600;
 const MAX_AI_STYLES = 14;
+const MAX_AI_H3_SUGGESTIONS = 6;
+const MAX_AI_SECTION_SUGGESTIONS = 3;
 const MIN_AI_QUOTE_LENGTH = 6;
 const MAX_AI_QUOTE_LENGTH = 60;
 const DEFAULT_REQUEST_TIMEOUT_MS = 25000;
 const MAX_REQUEST_TIMEOUT_MS = 25000;
-const LOCAL_FALLBACK_NOTICE = "AI 样式生成较慢或暂时不可用，已返回完整的本地排版。";
+const LOCAL_FALLBACK_NOTICE = "AI 生成较慢或暂时不可用，已返回完整的本地排版。";
 const SLOW_RESPONSE_ERROR = "DeepSeek 当前响应较慢或繁忙，已使用本地排版。";
 const VALID_BLOCK_TYPES = new Set(["h1", "h2", "h3", "p", "hr"]);
 const VALID_COLORS = new Set(["red", "blue"]);
+const VALID_STRUCTURE_ACTIONS = new Set(["h3", "section"]);
+const unsafeAiH3OpeningPattern = /^(我先说|我认为|我觉得|我的看法|很多人|有些人|有人|如果|所以|因此|总之)/;
 const FALLBACKABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 const endPunctuation = /[。！？!?；;，,、：:]$/;
 const markdownDividerPattern = /^-{3,}$/;
@@ -46,8 +50,10 @@ const implicitSectionScenePattern = /(家长|学生|同事|领导|孩子|老师|
 const continuationOpeningPattern = /^(这些|这种|同时|也|还|而且|然后|后来|前面|刚开始|上面|这时候)/;
 const structuralHeadingOpeningPattern =
   /^(先看|再看|接着看|然后才是|首先|其次|再次|最后(?:再)?看|最后(?:是|，|,|：|:)|第[一二三四五六七八九十\d]+笔账(?:是|：|:)|第[一二三四五六七八九十\d]+周可以从|资料选择(?:也)?要|计划不要|到了周末)/;
+const numberedMatterOpeningPattern = /^(?:提前准备的)?第([一二三四五六七八九十\d]+)件事[，,:：]/;
 const structuralHeadingMinLength = 6;
 const structuralHeadingMaxLength = 34;
+const numberedMatterHeadingMaxLength = 40;
 const prohibitionPattern = /(^不能|不能(?:把|只|让|靠|等|将|用|因为|为了|完全|仅|说|有)|不应|不该)/;
 const maxInlineColorLength = 60;
 const minInlineColorLength = 6;
@@ -88,8 +94,9 @@ export default async function handler(req, res) {
     let notice;
 
     try {
-      const rawStyles = await requestDeepSeekStyles(text, apiKey);
-      blocks = applyStyleSuggestions(blocks, rawStyles.styles, text);
+      const enhancements = await requestDeepSeekEnhancements(text, apiKey);
+      blocks = applyStructureSuggestions(blocks, enhancements.structure, text);
+      blocks = applyStyleSuggestions(blocks, enhancements.styles, text);
     } catch (error) {
       if (!isFallbackableDeepSeekError(error)) throw error;
       notice = LOCAL_FALLBACK_NOTICE;
@@ -107,7 +114,7 @@ export default async function handler(req, res) {
   }
 }
 
-async function requestDeepSeekStyles(text, apiKey) {
+async function requestDeepSeekEnhancements(text, apiKey) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), getRequestTimeoutMs());
 
@@ -125,8 +132,14 @@ async function requestDeepSeekStyles(text, apiKey) {
             role: "system",
             content: [
               "你是小红书图文排版助手，只返回严格 JSON，不要 Markdown，不要解释。",
-              "只挑选原文中适合加粗或标红蓝色的少量连续引用，不负责标题、分段、分隔线、黄色高亮或红色波浪线。",
-              "返回格式必须是：{\"styles\":[{\"quote\":\"原文中的连续文字\",\"bold\":true,\"color\":\"red|blue\"}]}。",
+              "从原文中判断结构句和重点样式，但只能逐字引用原文，不能改写、概括、补字或调整标点。",
+              "返回格式必须是：{\"structure\":[{\"quote\":\"原文段首完整句\",\"action\":\"h3|section\"}],\"styles\":[{\"quote\":\"原文中的连续文字\",\"bold\":true,\"color\":\"red|blue\"}]}。",
+              "structure 最多 9 条，其中 h3 最多 6 条、section 最多 3 条。quote 必须是自然段开头的完整第一句，长度 6 到 60 字，并且在全文唯一出现。",
+              "h3 只用于能够统领后续内容的阶段、动作或主题句，例如成组序号、明确的新任务、新方法或新讨论主题；通常后面还有句子继续展开它。",
+              "判断 h3 时重点看句间关系：移出首句后，余下内容仍是在解释它、列举它或给出它的步骤，才适合升为标题；没有序号但承担同样统领作用的简短主题句也可以选择。",
+              "section 用于值得单独开始新区块、但不适合显示成标题的心态转折、建议转折或结尾收束句。",
+              "不要把开场观点、普通强观点、风险提醒、疑问句、单纯结论或只解释自身的正文句标为 h3。不要选择 Markdown 主标题和已有标题。",
+              "一篇约 8 到 14 个自然段的文章通常选择 4 到 6 个 h3；没有高置信度结构句时可以少选或不选。",
               "styles 最多 14 条，建议 8 到 12 条；每条 quote 必须逐字复制原文中唯一出现的一段连续文字，长度 6 到 60 字。",
               "quote 不能跨自然段，不能包含 Markdown 标题或分隔线，不能改写、删减、概括、补字或调整标点。",
               "红色用于提醒、风险、不要做、必须注意和常见错误；蓝色用于方法、结论、收益、行动建议和总结性判断。",
@@ -136,7 +149,7 @@ async function requestDeepSeekStyles(text, apiKey) {
           },
           {
             role: "user",
-            content: `请只返回下面文章中的重点样式引用：\n\n${text}`,
+            content: `请判断下面文章的结构句和重点样式，并只返回约定的 JSON：\n\n${text}`,
           },
         ],
         response_format: { type: "json_object" },
@@ -178,12 +191,12 @@ async function requestDeepSeekStyles(text, apiKey) {
       throw new DeepSeekRequestError("DeepSeek 返回内容被截断，这次没有生成初稿。请缩短原文后再试一次。", true);
     }
 
-    const styles = parseStyleContent(content);
-    if (!styles) {
+    const enhancements = parseDraftEnhancements(content);
+    if (!enhancements) {
       throw new DeepSeekRequestError("DeepSeek 返回格式异常，已使用本地排版。", true);
     }
 
-    return styles;
+    return enhancements;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new DeepSeekRequestError(SLOW_RESPONSE_ERROR, true);
@@ -221,11 +234,18 @@ function safeParseJson(value) {
   }
 }
 
-function parseStyleContent(content) {
+function parseDraftEnhancements(content) {
   const parsed = parseJsonLoose(content);
   if (!parsed) return null;
-  if (Array.isArray(parsed?.styles)) return { styles: parsed.styles };
-  if (Array.isArray(parsed?.data?.styles)) return { styles: parsed.data.styles };
+  const candidate = parsed?.data && typeof parsed.data === "object" ? parsed.data : parsed;
+  const hasStyles = Array.isArray(candidate?.styles);
+  const hasStructure = Array.isArray(candidate?.structure);
+  if (hasStyles || hasStructure) {
+    return {
+      structure: hasStructure ? candidate.structure : [],
+      styles: hasStyles ? candidate.styles : [],
+    };
+  }
   return null;
 }
 
@@ -355,6 +375,97 @@ function sanitizeSegments(segments) {
     result.push(segment);
     return result;
   }, []);
+}
+
+function applyStructureSuggestions(blocks, rawStructure, sourceText) {
+  const nextBlocks = blocks.map((block) => ({
+    ...block,
+    segments: block.segments?.map((segment) => ({ ...segment })),
+  }));
+  const suggestions = getValidStructureSuggestions(rawStructure, sourceText);
+
+  suggestions.forEach(({ quote, action }) => {
+    if (action === "h3" && nextBlocks.some((block) => block.type === "h3" && block.text === quote)) {
+      return;
+    }
+
+    const blockIndex = nextBlocks.findIndex((block) => block.type === "p" && block.text.startsWith(quote));
+    if (blockIndex === -1) return;
+
+    if (nextBlocks[blockIndex - 1]?.type !== "hr") {
+      nextBlocks.splice(blockIndex, 0, createFallbackBlock("hr"));
+    }
+
+    if (action === "section") return;
+
+    const paragraphIndex = nextBlocks.findIndex((block) => block.type === "p" && block.text.startsWith(quote));
+    if (paragraphIndex === -1) return;
+
+    const paragraph = nextBlocks[paragraphIndex];
+    const remainder = paragraph.text.slice(quote.length).trim();
+    const replacement = [createFallbackBlock("h3", quote)];
+    if (remainder) {
+      replacement.push(createFallbackBlock("p", remainder, decorateFallbackSegments(remainder)));
+    }
+    nextBlocks.splice(paragraphIndex, 1, ...replacement);
+  });
+
+  return compactDividers(nextBlocks);
+}
+
+function getValidStructureSuggestions(rawStructure, sourceText) {
+  if (!Array.isArray(rawStructure)) return [];
+
+  const sourceParagraphOpenings = getSourceTextLines(sourceText).reduce((result, line, index) => {
+    if (
+      index === 0 ||
+      !line.hasBlankBefore ||
+      markdownDividerPattern.test(line.text) ||
+      getFallbackMarkdownHeading(line.text)
+    ) {
+      return result;
+    }
+
+    const firstSentence = getSentenceRanges(line.text)[0];
+    if (!firstSentence || firstSentence.start !== 0) return result;
+    result.set(line.text.slice(firstSentence.start, firstSentence.end).trim(), sourceText.indexOf(line.text));
+    return result;
+  }, new Map());
+  const accepted = [];
+  const usedQuotes = new Set();
+  let h3Count = 0;
+  let sectionCount = 0;
+
+  rawStructure.forEach((rawSuggestion) => {
+    if (
+      !rawSuggestion ||
+      typeof rawSuggestion !== "object" ||
+      typeof rawSuggestion.quote !== "string" ||
+      !VALID_STRUCTURE_ACTIONS.has(rawSuggestion.action)
+    ) {
+      return;
+    }
+
+    const quote = rawSuggestion.quote.trim();
+    const quoteLength = getComparableTextLength(quote);
+    if (quoteLength < MIN_AI_QUOTE_LENGTH || quoteLength > MAX_AI_QUOTE_LENGTH) return;
+    if (usedQuotes.has(quote) || countOccurrences(sourceText, quote) !== 1) return;
+    if (!sourceParagraphOpenings.has(quote)) return;
+    if (rawSuggestion.action === "h3" && (/[？?]$/.test(quote) || unsafeAiH3OpeningPattern.test(quote))) return;
+    if (rawSuggestion.action === "h3" && h3Count >= MAX_AI_H3_SUGGESTIONS) return;
+    if (rawSuggestion.action === "section" && sectionCount >= MAX_AI_SECTION_SUGGESTIONS) return;
+
+    usedQuotes.add(quote);
+    if (rawSuggestion.action === "h3") h3Count += 1;
+    if (rawSuggestion.action === "section") sectionCount += 1;
+    accepted.push({
+      quote,
+      action: rawSuggestion.action,
+      sourceIndex: sourceParagraphOpenings.get(quote),
+    });
+  });
+
+  return accepted.sort((left, right) => left.sourceIndex - right.sourceIndex);
 }
 
 function applyStyleSuggestions(blocks, rawStyles, sourceText) {
@@ -500,6 +611,7 @@ function createSourcePreservingDraft(text) {
   const blocks = [];
   let hasTitle = false;
   let sectionParagraphTexts = [];
+  const numberedMatterHeadingLines = getOrderedNumberedMatterHeadingLines(lines);
   const hasExplicitSections = lines.some((line, index) => {
     if (index === 0 || markdownDividerPattern.test(line.text)) return false;
     const markdownHeading = getFallbackMarkdownHeading(line.text);
@@ -563,7 +675,7 @@ function createSourcePreservingDraft(text) {
       return;
     }
 
-    const structuralHeading = splitLeadingStructuralHeading(line.text);
+    const structuralHeading = splitLeadingStructuralHeading(line.text, numberedMatterHeadingLines.has(line.text));
     if (structuralHeading) {
       addFallbackDivider(blocks);
       blocks.push(createFallbackBlock("h3", structuralHeading.heading));
@@ -593,16 +705,17 @@ function getFallbackMarkdownHeading(line) {
   };
 }
 
-function splitLeadingStructuralHeading(line) {
+function splitLeadingStructuralHeading(line, allowNumberedMatter = false) {
   const firstSentence = getSentenceRanges(line)[0];
   if (!firstSentence || firstSentence.start !== 0) return null;
 
   const heading = line.slice(firstSentence.start, firstSentence.end).trim();
   const headingLength = getComparableTextLength(heading);
+  const isNumberedMatter = allowNumberedMatter && numberedMatterOpeningPattern.test(heading);
   if (
     headingLength < structuralHeadingMinLength ||
-    headingLength > structuralHeadingMaxLength ||
-    !structuralHeadingOpeningPattern.test(heading)
+    headingLength > (isNumberedMatter ? numberedMatterHeadingMaxLength : structuralHeadingMaxLength) ||
+    (!isNumberedMatter && !structuralHeadingOpeningPattern.test(heading))
   ) {
     return null;
   }
@@ -611,6 +724,55 @@ function splitLeadingStructuralHeading(line) {
     heading,
     remainder: line.slice(firstSentence.end).trim(),
   };
+}
+
+function getOrderedNumberedMatterHeadingLines(lines) {
+  const candidates = lines
+    .slice(1)
+    .map((line) => ({ line: line.text, ordinal: getNumberedMatterOrdinal(line.text) }))
+    .filter((candidate) => candidate.ordinal !== null);
+  const approvedLines = new Set();
+  let run = [];
+
+  const approveRun = () => {
+    if (run.length >= 2) run.forEach((candidate) => approvedLines.add(candidate.line));
+  };
+
+  candidates.forEach((candidate) => {
+    if (!run.length || candidate.ordinal === run[run.length - 1].ordinal + 1) {
+      run.push(candidate);
+      return;
+    }
+
+    approveRun();
+    run = [candidate];
+  });
+  approveRun();
+
+  return approvedLines;
+}
+
+function getNumberedMatterOrdinal(text) {
+  const match = numberedMatterOpeningPattern.exec(text);
+  if (!match) return null;
+
+  if (/^\d+$/.test(match[1])) {
+    const value = Number(match[1]);
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+
+  return {
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
+  }[match[1]] ?? null;
 }
 
 function isFallbackHeading(line, index) {
@@ -881,4 +1043,4 @@ function hasProhibition(text) {
   return prohibitionPattern.test(String(text ?? "").replace(/能不能/g, ""));
 }
 
-export { applyStyleSuggestions, createSourcePreservingDraft, parseStyleContent };
+export { applyStructureSuggestions, applyStyleSuggestions, createSourcePreservingDraft, parseDraftEnhancements };

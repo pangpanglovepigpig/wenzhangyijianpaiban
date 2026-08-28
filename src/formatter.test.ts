@@ -1,6 +1,12 @@
 import { describe, expect, test } from "vitest";
 import { createBlocksFromText, makeBlock, stabilizeAiDraftBlocks } from "./formatter";
-import { shenzhenArticle, shenzhenHeadings } from "./testFixtures";
+import {
+  shenzhenArticle,
+  shenzhenHeadings,
+  xiaomianAiHeadings,
+  xiaomianArticle,
+  xiaomianLocalHeadings,
+} from "./testFixtures";
 
 function types(blocks: ReturnType<typeof createBlocksFromText>) {
   return blocks.map((block) => block.type);
@@ -220,6 +226,58 @@ describe("createBlocksFromText", () => {
     expect(blocks.filter((block) => block.underline)).toHaveLength(3);
   });
 
+  test("recognizes only complete ordered groups of numbered matters", () => {
+    const blocks = createBlocksFromText(xiaomianArticle);
+
+    expect(blocks.filter((block) => block.type === "h3").map((block) => block.text)).toEqual(xiaomianLocalHeadings);
+    expect(hrCount(blocks)).toBe(6);
+
+    const numeric = createBlocksFromText(`### 数字序列
+
+第1件事，是确定真实目标。后面继续解释具体判断。
+
+第2件事，是完成一次验证。后面继续解释具体做法。`);
+    const isolated = createBlocksFromText(`### 单独序号
+
+第一件事，是先处理眼前的问题。后面继续解释具体做法。`);
+    const broken = createBlocksFromText(`### 断裂序号
+
+第一件事，是先处理眼前的问题。后面继续解释具体做法。
+
+第三件事，是再检查最终结果。后面继续解释判断过程。`);
+    const groupedThenBroken = createBlocksFromText(`### 局部连续序号
+
+第一件事，是先处理眼前的问题。后面继续解释具体做法。
+
+第二件事，是再完成一次验证。后面继续解释判断过程。
+
+第四件事，是补充一个单独事项。后面继续解释补充内容。`);
+
+    expect(numeric.filter((block) => block.type === "h3")).toHaveLength(2);
+    expect(isolated.filter((block) => block.type === "h3")).toHaveLength(0);
+    expect(broken.filter((block) => block.type === "h3")).toHaveLength(0);
+    expect(groupedThenBroken.filter((block) => block.type === "h3").map((block) => block.text)).toEqual([
+      "第一件事，是先处理眼前的问题。",
+      "第二件事，是再完成一次验证。",
+    ]);
+  });
+
+  test("preserves a source-exact AI structure that safely adds headings and sections", () => {
+    const aiBlocks = createSafeXiaomianAiBlocks();
+    const stabilized = stabilizeAiDraftBlocks(aiBlocks, xiaomianArticle);
+    const reconstructed = stabilized
+      .filter((block) => block.type !== "hr")
+      .map((block) => block.text)
+      .join("")
+      .replace(/\s/g, "");
+
+    expect(stabilized.filter((block) => block.type === "h3").map((block) => block.text)).toEqual(xiaomianAiHeadings);
+    expect(hrCount(stabilized)).toBe(9);
+    expect(reconstructed).toBe(comparableSourceText(xiaomianArticle));
+    expect(stabilized.filter((block) => block.highlight).length).toBeLessThanOrEqual(3);
+    expect(stabilized.filter((block) => block.underline).length).toBeLessThanOrEqual(3);
+  });
+
   test("uses local structure for AI drafts with missing or misplaced dividers while keeping AI styles", () => {
     const localBlocks = createBlocksFromText(shenzhenArticle);
     const expectedStructure = localBlocks.map(({ type, text }) => ({ type, text }));
@@ -282,6 +340,45 @@ function createUnstructuredAiBlocks(includeMisplacedDividers: boolean) {
 
     return includeMisplacedDividers && index > 0 ? [makeBlock("hr"), textBlock] : [textBlock];
   });
+}
+
+function createSafeXiaomianAiBlocks() {
+  const blocks = createBlocksFromText(xiaomianArticle).map((block) => makeBlock(
+    block.type,
+    block.text,
+    false,
+    false,
+    block.segments,
+  ));
+  const suggestions = [
+    ...xiaomianAiHeadings.map((quote) => ({ quote, action: "h3" as const })),
+    {
+      quote: "小面有机会价值，也有练习价值，但不要把一次积极反馈当成最终结果。",
+      action: "section" as const,
+    },
+    {
+      quote:
+        "所以，小面提前准备的不是神秘题库，而是三个随时能拿出来的东西：说得清自己，听得懂问题，知道怎样了解一所学校。",
+      action: "section" as const,
+    },
+  ];
+
+  suggestions.forEach(({ quote, action }) => {
+    if (action === "h3" && blocks.some((block) => block.type === "h3" && block.text === quote)) return;
+
+    let blockIndex = blocks.findIndex((block) => block.type === "p" && block.text.startsWith(quote));
+    if (blockIndex === -1) return;
+    if (blocks[blockIndex - 1]?.type !== "hr") {
+      blocks.splice(blockIndex, 0, makeBlock("hr"));
+      blockIndex += 1;
+    }
+    if (action === "section") return;
+
+    const remainder = blocks[blockIndex].text.slice(quote.length).trim();
+    blocks.splice(blockIndex, 1, makeBlock("h3", quote), ...(remainder ? [makeBlock("p", remainder)] : []));
+  });
+
+  return blocks;
 }
 
 function createStyledSegments(

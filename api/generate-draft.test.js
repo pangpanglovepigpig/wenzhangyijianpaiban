@@ -1,7 +1,18 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createBlocksFromText } from "../src/formatter";
-import { shenzhenArticle, shenzhenHeadings } from "../src/testFixtures";
-import handler, { applyStyleSuggestions, createSourcePreservingDraft, parseStyleContent } from "./generate-draft";
+import {
+  shenzhenArticle,
+  shenzhenHeadings,
+  xiaomianAiHeadings,
+  xiaomianArticle,
+  xiaomianLocalHeadings,
+} from "../src/testFixtures";
+import handler, {
+  applyStructureSuggestions,
+  applyStyleSuggestions,
+  createSourcePreservingDraft,
+  parseDraftEnhancements,
+} from "./generate-draft";
 
 function createResponseRecorder() {
   let payload;
@@ -51,6 +62,143 @@ describe("source-preserving API fallback", () => {
     expect(fallbackBlocks).toEqual(localBlocks);
     expect(fallbackBlocks.filter((block) => block.type === "hr")).toHaveLength(7);
     expect(fallbackBlocks.filter((block) => block.type === "h3").map((block) => block.text)).toEqual(shenzhenHeadings);
+  });
+
+  test("promotes an ordered group of numbered matters but not isolated or broken sequences", () => {
+    const localBlocks = createBlocksFromText(xiaomianArticle).map(({ type, text }) => ({ type, text }));
+    const fallbackBlocks = createSourcePreservingDraft(xiaomianArticle).blocks.map(({ type, text }) => ({ type, text }));
+
+    expect(fallbackBlocks).toEqual(localBlocks);
+    expect(fallbackBlocks.filter((block) => block.type === "h3").map((block) => block.text)).toEqual(
+      xiaomianLocalHeadings,
+    );
+
+    [
+      `### 单独序号\n\n第一件事，是先处理眼前的问题。后面继续解释。`,
+      `### 断裂序号\n\n第一件事，是先处理眼前的问题。后面继续解释。\n\n第三件事，是再检查结果。后面继续解释。`,
+    ].forEach((source) => {
+      expect(createSourcePreservingDraft(source).blocks.filter((block) => block.type === "h3")).toHaveLength(0);
+    });
+  });
+});
+
+describe("compact AI structure suggestions", () => {
+  const structureSuggestions = [
+    ...xiaomianAiHeadings.map((quote) => ({ quote, action: "h3" })),
+    {
+      quote: "小面有机会价值，也有练习价值，但不要把一次积极反馈当成最终结果。",
+      action: "section",
+    },
+    {
+      quote:
+        "所以，小面提前准备的不是神秘题库，而是三个随时能拿出来的东西：说得清自己，听得懂问题，知道怎样了解一所学校。",
+      action: "section",
+    },
+  ];
+
+  test("applies six source-exact headings and two section-only dividers", () => {
+    const localBlocks = createSourcePreservingDraft(xiaomianArticle).blocks;
+    const structured = applyStructureSuggestions(localBlocks, structureSuggestions, xiaomianArticle);
+    const reconstructed = structured
+      .filter((block) => block.type !== "hr")
+      .map((block) => block.text)
+      .join("")
+      .replace(/\s/g, "");
+    const expected = xiaomianArticle
+      .split(/\r?\n/)
+      .map((line) => line.trim().replace(/^#{1,3}\s+/, ""))
+      .filter(Boolean)
+      .join("")
+      .replace(/\s/g, "");
+
+    expect(structured.filter((block) => block.type === "h3").map((block) => block.text)).toEqual(xiaomianAiHeadings);
+    expect(structured.filter((block) => block.type === "hr")).toHaveLength(9);
+    expect(reconstructed).toBe(expected);
+  });
+
+  test("drops one invalid suggestion without affecting valid structure and removes styles from promoted headings", () => {
+    const localBlocks = createSourcePreservingDraft(xiaomianArticle).blocks;
+    const heading = "学校相关信息也要提前学会查。";
+    const structured = applyStructureSuggestions(
+      localBlocks,
+      [
+        { quote: "学校资料也应该尽早开始查询。", action: "h3" },
+        { quote: heading, action: "h3" },
+      ],
+      xiaomianArticle,
+    );
+    const styled = applyStyleSuggestions(
+      structured,
+      [{ quote: heading, bold: true, color: "blue" }],
+      xiaomianArticle,
+    );
+
+    expect(styled.some((block) => block.type === "h3" && block.text === heading)).toBe(true);
+    expect(styled.find((block) => block.type === "h3" && block.text === heading)?.segments).toBeUndefined();
+  });
+
+  test.each([
+    ["a non-opening sentence", { quote: "收到交流通知后，你可能只有一晚甚至更短时间，不适合那时才研究怎样看学校。", action: "h3" }],
+    ["a question", { quote: "为什么选择教师、为什么考虑这所学校或这个学段、你怎样理解一堂好课、遇到暂时不会的问题如何处理。", action: "h3" }],
+    ["a rewritten sentence", { quote: "学校资料也应该尽早开始查询。", action: "h3" }],
+    ["an unknown action", { quote: "学校相关信息也要提前学会查。", action: "h2" }],
+    ["a cross-paragraph quote", { quote: "形容词。\n\n你可以先做一版六十秒", action: "h3" }],
+  ])("rejects %s", (_label, suggestion) => {
+    const blocks = createSourcePreservingDraft(xiaomianArticle).blocks;
+    expect(applyStructureSuggestions(blocks, [suggestion], xiaomianArticle)).toEqual(blocks);
+  });
+
+  test("rejects repeated and overlong opening quotes", () => {
+    const repeated = "这一句开场内容在全文重复出现。";
+    const longQuote = `${"长".repeat(60)}。`;
+    const source = `### 校验测试\n\n${repeated}后面补充甲。\n\n${repeated}后面补充乙。\n\n${longQuote}后面补充丙。`;
+    const blocks = createSourcePreservingDraft(source).blocks;
+
+    expect(
+      applyStructureSuggestions(
+        blocks,
+        [
+          { quote: repeated, action: "h3" },
+          { quote: longQuote, action: "h3" },
+        ],
+        source,
+      ),
+    ).toEqual(blocks);
+  });
+
+  test("does not turn an ordinary personal stance or a question into a heading", () => {
+    const stance = "我认为这座城市值得认真考虑。";
+    const question = "你是否真的愿意长期留在这里？";
+    const source = `### 语义边界\n\n${stance}后面补充个人判断。\n\n${question}后面继续说明需要权衡的条件。`;
+    const blocks = createSourcePreservingDraft(source).blocks;
+
+    expect(
+      applyStructureSuggestions(
+        blocks,
+        [
+          { quote: stance, action: "h3" },
+          { quote: question, action: "h3" },
+        ],
+        source,
+      ),
+    ).toEqual(blocks);
+  });
+
+  test("caps accepted additions at six headings and three pure sections", () => {
+    const paragraphs = Array.from(
+      { length: 12 },
+      (_, index) => `编号${String(index + 1).padStart(2, "0")}对应一个独立的新主题句。后面继续解释这一主题的具体内容。`,
+    );
+    const source = `### 数量测试\n\n${paragraphs.join("\n\n")}`;
+    const blocks = createSourcePreservingDraft(source).blocks;
+    const suggestions = paragraphs.map((paragraph, index) => ({
+      quote: paragraph.slice(0, paragraph.indexOf("。") + 1),
+      action: index % 2 === 0 ? "h3" : "section",
+    }));
+    const structured = applyStructureSuggestions(blocks, suggestions, source);
+
+    expect(structured.filter((block) => block.type === "h3")).toHaveLength(6);
+    expect(structured.filter((block) => block.type === "hr")).toHaveLength(9);
   });
 });
 
@@ -112,10 +260,16 @@ describe("compact AI style suggestions", () => {
     expect(coloredCount).toBe(14);
   });
 
-  test("parses only a styles array and never evaluates malicious content", () => {
-    expect(parseStyleContent('{"styles":"not-an-array","__proto__":{"polluted":true}}')).toBeNull();
-    expect(parseStyleContent('```json\n{"styles":[{"quote":"安全的原文引用","bold":true,"color":"blue"}]}\n```'))
-      .toEqual({ styles: [{ quote: "安全的原文引用", bold: true, color: "blue" }] });
+  test("parses compact enhancements and never evaluates malicious content", () => {
+    expect(parseDraftEnhancements('{"styles":"not-an-array","__proto__":{"polluted":true}}')).toBeNull();
+    expect(
+      parseDraftEnhancements(
+        '```json\n{"structure":[{"quote":"安全的段首完整句。","action":"h3"}],"styles":[{"quote":"安全的原文引用","bold":true,"color":"blue"}]}\n```',
+      ),
+    ).toEqual({
+      structure: [{ quote: "安全的段首完整句。", action: "h3" }],
+      styles: [{ quote: "安全的原文引用", bold: true, color: "blue" }],
+    });
     expect({}.polluted).toBeUndefined();
   });
 });
@@ -158,7 +312,7 @@ describe("AI endpoint degradation", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          choices: [{ message: { content: '{"styles":[{"quote":"这是一段可以标蓝的正文内容","bold":true,"color":"blue"}]}' } }],
+          choices: [{ message: { content: '{"structure":[],"styles":[{"quote":"这是一段可以标蓝的正文内容","bold":true,"color":"blue"}]}' } }],
         }),
         { status: 200 },
       ),
@@ -172,12 +326,49 @@ describe("AI endpoint degradation", () => {
     const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(requestBody.max_tokens).toBe(1600);
     expect(requestBody.thinking).toEqual({ type: "disabled" });
+    expect(requestBody.messages[0].content).toContain('"structure"');
     expect(requestBody.messages[0].content).toContain('"styles"');
     expect(requestBody.messages[0].content).not.toContain('"blocks"');
     expect(recorder.getPayload().blocks.some((block) => block.segments?.some((segment) => segment.color === "blue")))
       .toBe(true);
   });
+
+  test("returns validated AI structure without changing the public response shape", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify({ structure: structureForEndpoint, styles: [] }) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const recorder = createResponseRecorder();
+
+    await handler({ method: "POST", body: { text: xiaomianArticle } }, recorder.response);
+
+    const payload = recorder.getPayload();
+    expect(Object.keys(payload)).toEqual(["blocks"]);
+    expect(payload.blocks.filter((block) => block.type === "h3").map((block) => block.text)).toEqual(xiaomianAiHeadings);
+    expect(payload.blocks.filter((block) => block.type === "hr")).toHaveLength(9);
+  });
 });
+
+const structureForEndpoint = [
+  ...xiaomianAiHeadings.map((quote) => ({ quote, action: "h3" })),
+  {
+    quote: "小面有机会价值，也有练习价值，但不要把一次积极反馈当成最终结果。",
+    action: "section",
+  },
+  {
+    quote:
+      "所以，小面提前准备的不是神秘题库，而是三个随时能拿出来的东西：说得清自己，听得懂问题，知道怎样了解一所学校。",
+    action: "section",
+  },
+];
 
 const articleForTimeout = `### 超时测试
 

@@ -32,6 +32,27 @@ describe("paginateBlocks", () => {
       }),
     ).toBe(true);
   });
+
+  test("keeps an AI section-only divider with the paragraph that follows it", () => {
+    const style = resolveCardStyle({ themeId: "apple-notes", fontFamilyId: "system", baseFontSize: 16.5 });
+    const blocks = [
+      makeBlock("intro", "p", "前一页正文"),
+      makeBlock("divider", "hr"),
+      makeBlock("closing", "p", "结尾收束段正文"),
+    ];
+    const heights = new Map([
+      ["intro", style.contentHeight - 30],
+      ["divider", 20],
+      ["closing", 35],
+    ]);
+
+    const pages = paginateBlocks(blocks, heights, style);
+
+    expect(pages.map((page) => page.blocks.map((block) => block.id))).toEqual([
+      ["intro"],
+      ["divider", "closing"],
+    ]);
+  });
 });
 
 function makeBlock(id: string, type: ContentBlock["type"], text = ""): ContentBlock {
