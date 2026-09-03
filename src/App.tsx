@@ -18,6 +18,7 @@ import { exportPagesToPng, measureBlocksForPng, type ExportedImage } from "./exp
 import { downloadImage, downloadImagesSequentially, type DownloadProgress } from "./downloadImages";
 import { blocksToMarkdown, createBlocksFromText, IMAGE_CONFIG, makeBlock, sampleArticle } from "./formatter";
 import { paginateBlocks } from "./pagination";
+import { DraftRequest } from "./draftRequest";
 import {
   DEFAULT_CARD_STYLE,
   FONT_OPTIONS,
@@ -45,8 +46,7 @@ export function App() {
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
   const [styleSettings, setStyleSettings] = useState<CardStyleSettings>(DEFAULT_CARD_STYLE);
   const previewRequestRef = useRef(0);
-  const draftRequestRef = useRef(0);
-  const draftAbortRef = useRef<AbortController | null>(null);
+  const draftRequestRef = useRef(new DraftRequest());
 
   const markdown = useMemo(() => blocksToMarkdown(blocks), [blocks]);
   const cardStyle = useMemo(() => resolveCardStyle(styleSettings), [styleSettings]);
@@ -64,7 +64,7 @@ export function App() {
   }, [images]);
 
   useEffect(() => {
-    return () => draftAbortRef.current?.abort();
+    return () => draftRequestRef.current.cancel(false);
   }, []);
 
   useEffect(() => {
@@ -126,37 +126,27 @@ export function App() {
   }
 
   async function generateDraft() {
-    if (!ENABLE_AI_DRAFT || isDraftGenerating || !sourceText.trim()) return;
+    if (!ENABLE_AI_DRAFT || draftRequestRef.current.pending || !sourceText.trim()) return;
 
-    cancelDraftRequest();
-    const requestId = draftRequestRef.current + 1;
-    draftRequestRef.current = requestId;
-    const controller = new AbortController();
-    draftAbortRef.current = controller;
     const requestedText = sourceText;
-    setIsDraftGenerating(true);
     setDraftError(null);
     setDraftNotice(null);
 
-    try {
-      const { generateDraftWithDeepSeek } = await import("./draftApi");
-      const result = await generateDraftWithDeepSeek(requestedText, controller.signal);
-      if (draftRequestRef.current !== requestId) return;
-
-      setBlocks(result.blocks);
-      setSelectedId(result.blocks[0]?.id ?? null);
-      setDraftNotice(result.notice ?? null);
-      clearImages();
-    } catch (error) {
-      if (draftRequestRef.current !== requestId) return;
-      if (error instanceof Error && error.name === "AbortError") return;
-      setDraftError(error instanceof Error ? error.message : "DeepSeek 生成失败，请稍后再试。");
-    } finally {
-      if (draftRequestRef.current === requestId) {
-        draftAbortRef.current = null;
-        setIsDraftGenerating(false);
-      }
-    }
+    await draftRequestRef.current.run(
+      async (signal) => {
+        const { generateDraftWithDeepSeek } = await import("./draftApi");
+        if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
+        return generateDraftWithDeepSeek(requestedText, signal);
+      },
+      (result) => {
+        setBlocks(result.blocks);
+        setSelectedId(result.blocks[0]?.id ?? null);
+        setDraftNotice(result.notice ?? null);
+        clearImages();
+      },
+      (error) => setDraftError(error instanceof Error ? error.message : "AI 排版失败，请稍后再试。"),
+      setIsDraftGenerating,
+    );
   }
 
   function updateBlock(id: string, patch: Partial<ContentBlock>) {
@@ -237,10 +227,7 @@ export function App() {
   }
 
   function cancelDraftRequest() {
-    draftRequestRef.current += 1;
-    draftAbortRef.current?.abort();
-    draftAbortRef.current = null;
-    setIsDraftGenerating(false);
+    draftRequestRef.current.cancel();
   }
 
   async function saveAllImages() {
@@ -273,23 +260,19 @@ export function App() {
               <h1>小红书图文排版</h1>
             </div>
             <div className="input-actions">
-              <button className="primary-button" onClick={formatSourceText} disabled={!sourceText.trim()}>
+              <button className="primary-button" onClick={ENABLE_AI_DRAFT ? generateDraft : formatSourceText}
+                disabled={isDraftGenerating || !sourceText.trim()}>
                 <Rows3 size={18} />
-                排版文章
+                {isDraftGenerating ? "AI 排版中…" : "排版文章"}
               </button>
-              {ENABLE_AI_DRAFT && (
-                <button
-                  className="secondary-button"
-                  onClick={generateDraft}
-                  disabled={isDraftGenerating || !sourceText.trim()}
-                >
-                  <RefreshCcw size={18} />
-                  {isDraftGenerating ? "AI生成中" : "生成初稿"}
-                </button>
-              )}
             </div>
           </div>
 
+          <div className="draft-notice" role="status">
+            {ENABLE_AI_DRAFT
+              ? (isDraftGenerating ? "正在判断分区、三级标题和重点，完成后一次性更新；最长等待约 25 秒。" : "AI 排版：自动判断分区、三级标题和重点。")
+              : <>本地排版，无 AI。<a href="https://wenzhangyijianpaiban.vercel.app/" target="_blank" rel="noreferrer">前往正式站使用 AI 排版</a></>}
+          </div>
           <textarea
             className="source-input"
             value={sourceText}

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createBlocksFromText } from "../src/formatter";
+import { buildSentenceIndex } from "../shared/articleStructure.js";
 import {
   shenzhenArticle,
   shenzhenHeadings,
@@ -8,11 +9,24 @@ import {
   xiaomianLocalHeadings,
 } from "../src/testFixtures";
 import handler, {
-  applyStructureSuggestions,
+  applyStructureSuggestions as applyBySentenceId,
   applyStyleSuggestions,
   createSourcePreservingDraft,
   parseDraftEnhancements,
 } from "./generate-draft";
+
+// Existing article expectations are expressed as quotes for readability only;
+// the actual model/API contract now exclusively uses stable sentence IDs.
+function idsFor(source, suggestions) {
+  const index = buildSentenceIndex(source);
+  return suggestions.map(({ quote, action }) => ({
+    sentenceId: index.find((sentence) => sentence.text === quote)?.sentenceId ?? "missing",
+    action,
+  }));
+}
+function applyStructureSuggestions(blocks, suggestions, source) {
+  return applyBySentenceId(blocks, idsFor(source, suggestions), source);
+}
 
 function createResponseRecorder() {
   let payload;
@@ -29,6 +43,7 @@ function createResponseRecorder() {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   delete process.env.DEEPSEEK_API_KEY;
   delete process.env.DEEPSEEK_TIMEOUT_MS;
@@ -138,7 +153,6 @@ describe("compact AI structure suggestions", () => {
   });
 
   test.each([
-    ["a non-opening sentence", { quote: "收到交流通知后，你可能只有一晚甚至更短时间，不适合那时才研究怎样看学校。", action: "h3" }],
     ["a question", { quote: "为什么选择教师、为什么考虑这所学校或这个学段、你怎样理解一堂好课、遇到暂时不会的问题如何处理。", action: "h3" }],
     ["a rewritten sentence", { quote: "学校资料也应该尽早开始查询。", action: "h3" }],
     ["an unknown action", { quote: "学校相关信息也要提前学会查。", action: "h2" }],
@@ -148,7 +162,7 @@ describe("compact AI structure suggestions", () => {
     expect(applyStructureSuggestions(blocks, [suggestion], xiaomianArticle)).toEqual(blocks);
   });
 
-  test("rejects repeated and overlong opening quotes", () => {
+  test("rejects overlong sentences, while repeated sentences are unambiguous by ID", () => {
     const repeated = "这一句开场内容在全文重复出现。";
     const longQuote = `${"长".repeat(60)}。`;
     const source = `### 校验测试\n\n${repeated}后面补充甲。\n\n${repeated}后面补充乙。\n\n${longQuote}后面补充丙。`;
@@ -158,7 +172,6 @@ describe("compact AI structure suggestions", () => {
       applyStructureSuggestions(
         blocks,
         [
-          { quote: repeated, action: "h3" },
           { quote: longQuote, action: "h3" },
         ],
         source,
@@ -275,6 +288,59 @@ describe("compact AI style suggestions", () => {
 });
 
 describe("AI endpoint degradation", () => {
+  test("aborts at 25 seconds and returns the complete local layout without leaking source or keys", async () => {
+    vi.useFakeTimers();
+    process.env.DEEPSEEK_API_KEY = "secret-do-not-log";
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn((_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(Object.assign(new Error("abort"), { name: "AbortError" })));
+    })));
+    const recorder = createResponseRecorder();
+    const run = handler({ method: "POST", body: { text: shenzhenArticle } }, recorder.response);
+    await vi.advanceTimersByTimeAsync(24999);
+    expect(recorder.getPayload()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await run;
+    expect(recorder.response.statusCode).toBe(200);
+    expect(recorder.getPayload().blocks).toEqual(createSourcePreservingDraft(shenzhenArticle).blocks);
+    expect(recorder.getPayload().notice).toContain("本地排版");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret-do-not-log");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("深圳");
+    log.mockRestore();
+  });
+
+  test("reports all-rejected structure while keeping a valid style", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        structure: [{ sentenceId: "bad", action: "h3" }],
+        styles: [{ quote: "这是一段没有特殊关键词的文字", bold: true, color: "blue" }],
+      }) } }],
+    }))));
+    const source = "### 校验提示\n这是一段没有特殊关键词的文字，接着说明内容。";
+    const recorder = createResponseRecorder();
+    await handler({ method: "POST", body: { text: source } }, recorder.response);
+    expect(recorder.getPayload().notice).toContain("安全校验");
+    expect(recorder.getPayload().blocks.some((b) => b.segments?.some((s) => s.color === "blue"))).toBe(true);
+  });
+
+  test.each([408, 429, 500, 502, 503, 504])("degrades transient HTTP %i", async (status) => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("busy", { status })));
+    const recorder = createResponseRecorder();
+    await handler({ method: "POST", body: { text: shenzhenArticle } }, recorder.response);
+    expect(recorder.response.statusCode).toBe(200);
+    expect(recorder.getPayload().notice).toContain("本地排版");
+  });
+
+  test.each([401, 403])("keeps configuration HTTP %i as an error without echoing provider content", async (status) => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("sensitive provider content", { status })));
+    const recorder = createResponseRecorder();
+    await handler({ method: "POST", body: { text: shenzhenArticle } }, recorder.response);
+    expect(recorder.response.statusCode).toBe(502);
+    expect(recorder.getPayload().error).not.toContain("sensitive");
+  });
   test("returns the complete local Shenzhen layout when AI JSON is invalid", async () => {
     process.env.DEEPSEEK_API_KEY = "test-key";
     vi.stubGlobal(
@@ -327,6 +393,8 @@ describe("AI endpoint degradation", () => {
     expect(requestBody.max_tokens).toBe(1600);
     expect(requestBody.thinking).toEqual({ type: "disabled" });
     expect(requestBody.messages[0].content).toContain('"structure"');
+    expect(requestBody.messages[0].content).toContain('"sentenceId"');
+    expect(JSON.parse(requestBody.messages[1].content)[1]).toMatchObject({ sentenceId: "s2", kind: "body", complete: true });
     expect(requestBody.messages[0].content).toContain('"styles"');
     expect(requestBody.messages[0].content).not.toContain('"blocks"');
     expect(recorder.getPayload().blocks.some((block) => block.segments?.some((segment) => segment.color === "blue")))
@@ -340,7 +408,7 @@ describe("AI endpoint degradation", () => {
       vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
-            choices: [{ message: { content: JSON.stringify({ structure: structureForEndpoint, styles: [] }) } }],
+            choices: [{ message: { content: JSON.stringify({ structure: idsFor(xiaomianArticle, structureForEndpoint), styles: [] }) } }],
           }),
           { status: 200 },
         ),
