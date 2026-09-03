@@ -507,8 +507,8 @@ function getMarkdownHeading(line) {
     };
 }
 function splitLeadingStructuralHeading(line, allowNumberedMatter = false) {
-    const firstSentence = getSentenceRanges(line)[0];
-    if (!firstSentence || firstSentence.start !== 0)
+    const firstSentence = completeSentenceRanges(line)[0];
+    if (!firstSentence?.complete || firstSentence.start !== 0)
         return null;
     const heading = line.slice(firstSentence.start, firstSentence.end).trim();
     const headingLength = getComparableTextLength(heading);

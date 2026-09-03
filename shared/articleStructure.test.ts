@@ -58,6 +58,13 @@ describe("shared sentence-position structure", () => {
     expect(index.some((s) => s.text.startsWith("仍要"))).toBe(false);
   });
 
+  test("local structural headings also use full sentences, not semicolon fragments", () => {
+    const source = "### 完整标题\n\n首先要明确方向；再按步骤完成准备。后面解释具体安排。";
+    const blocks = createBlocksFromText(source);
+    expect(signature(blocks).map((s) => s.text)).toEqual(["首先要明确方向；再按步骤完成准备。"]);
+    expect(draftPreservesSource(blocks, source)).toBe(true);
+  });
+
   test("allows exactly one occurrence of a repeated sentence to be selected by ID", () => {
     const source = "### 重复测试\n也别只背素材。这里继续解释第一个主题。也别只背素材。这里继续解释第二个主题。";
     const repeated = buildSentenceIndex(source).filter((s) => s.text === "也别只背素材。");
