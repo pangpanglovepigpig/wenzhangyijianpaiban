@@ -324,7 +324,7 @@ describe("AI endpoint degradation", () => {
     expect(recorder.getPayload().blocks.some((b) => b.segments?.some((s) => s.color === "blue"))).toBe(true);
   });
 
-  test.each([408, 429, 500, 502, 503, 504])("degrades transient HTTP %i", async (status) => {
+  test.each([408, 429, 500, 501, 502, 503, 504, 599])("degrades transient HTTP %i", async (status) => {
     process.env.DEEPSEEK_API_KEY = "test-key";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("busy", { status })));
     const recorder = createResponseRecorder();

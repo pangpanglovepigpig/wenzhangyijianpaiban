@@ -66,6 +66,19 @@ describe("shared sentence-position structure", () => {
     expect(draftPreservesSource(structured, source)).toBe(true);
   });
 
+  test("rejects an adjacent structure item rather than leaving a heading without body", () => {
+    const source = "### 相邻结构\n建立清楚的方法。也别只背素材。这里继续解释具体做法。";
+    const index = buildSentenceIndex(source);
+    const stats = { accepted: 0, rejected: 0, reasons: {} };
+    const structured = applyStructureSuggestions(createBlocksFromText(source), [
+      { sentenceId: index[1].sentenceId, action: "h3" },
+      { sentenceId: index[2].sentenceId, action: "h3" },
+    ], source, stats);
+    expect(signature(structured).map((s) => s.text)).toEqual(["建立清楚的方法。"]);
+    expect(stats.reasons).toEqual({ adjacent_structure: 1 });
+    expect(draftPreservesSource(structured, source)).toBe(true);
+  });
+
   test("keeps valid suggestions when IDs, actions, partial quotes and questions are invalid", () => {
     const source = '### 安全测试\n先解释一点背景。你真的想好了吗？也别只背素材。这里展开具体说明。';
     const index = buildSentenceIndex(source);

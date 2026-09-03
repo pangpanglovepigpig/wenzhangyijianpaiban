@@ -139,7 +139,7 @@ async function requestDeepSeekEnhancements(text, apiKey) {
         );
       }
 
-      if (FALLBACKABLE_STATUSES.has(response.status)) {
+      if (FALLBACKABLE_STATUSES.has(response.status) || response.status >= 500) {
         throw new DeepSeekRequestError(SLOW_RESPONSE_ERROR, true);
       }
 
