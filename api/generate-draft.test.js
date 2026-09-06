@@ -35,7 +35,7 @@ function createResponseRecorder() {
       statusCode: 0,
       setHeader: vi.fn(),
       end(value) {
-        payload = JSON.parse(value);
+        payload = value ? JSON.parse(value) : undefined;
       },
     },
     getPayload: () => payload,
@@ -288,6 +288,46 @@ describe("compact AI style suggestions", () => {
 });
 
 describe("AI endpoint degradation", () => {
+  test("accepts GitHub Pages preflight with a restricted origin", async () => {
+    const recorder = createResponseRecorder();
+    await handler({
+      method: "OPTIONS",
+      headers: { origin: "https://pangpanglovepigpig.github.io" },
+    }, recorder.response);
+
+    expect(recorder.response.statusCode).toBe(204);
+    expect(recorder.response.setHeader).toHaveBeenCalledWith(
+      "Access-Control-Allow-Origin",
+      "https://pangpanglovepigpig.github.io",
+    );
+    expect(recorder.response.setHeader).toHaveBeenCalledWith("Access-Control-Allow-Methods", "POST, OPTIONS");
+    expect(recorder.getPayload()).toBeUndefined();
+  });
+
+  test("does not grant preflight access to other browser origins", async () => {
+    const recorder = createResponseRecorder();
+    await handler({ method: "OPTIONS", headers: { origin: "https://example.com" } }, recorder.response);
+
+    expect(recorder.response.statusCode).toBe(403);
+    expect(recorder.response.setHeader).not.toHaveBeenCalledWith("Access-Control-Allow-Origin", expect.anything());
+  });
+
+  test("keeps CORS headers on GitHub Pages error responses", async () => {
+    const recorder = createResponseRecorder();
+    await handler({
+      method: "POST",
+      headers: { origin: "https://pangpanglovepigpig.github.io" },
+      body: { text: shenzhenArticle },
+    }, recorder.response);
+
+    expect(recorder.response.statusCode).toBe(500);
+    expect(recorder.response.setHeader).toHaveBeenCalledWith(
+      "Access-Control-Allow-Origin",
+      "https://pangpanglovepigpig.github.io",
+    );
+    expect(recorder.getPayload().error).toContain("DEEPSEEK_API_KEY");
+  });
+
   test("aborts at 25 seconds and returns the complete local layout without leaking source or keys", async () => {
     vi.useFakeTimers();
     process.env.DEEPSEEK_API_KEY = "secret-do-not-log";

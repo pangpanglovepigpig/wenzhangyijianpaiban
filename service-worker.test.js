@@ -3,7 +3,7 @@ import vm from "node:vm";
 import { describe, expect, test, vi } from "vitest";
 
 const APP_SCOPE = "https://example.com/wenzhangyijianpaiban/";
-const CURRENT_CACHE = "xiaohongshu-article-notes-v10";
+const CURRENT_CACHE = "xiaohongshu-article-notes-v11";
 const CURRENT_SCRIPT = `${APP_SCOPE}assets/app-current.js`;
 const CURRENT_STYLES = `${APP_SCOPE}assets/app-current.css`;
 const serviceWorkerSource = readFileSync(new URL("./public/service-worker.js", import.meta.url), "utf8");
@@ -36,12 +36,14 @@ describe("service worker cache upgrades", () => {
   test("deletes only old caches that belong to this app", async () => {
     const harness = createHarness();
     await harness.openCache(CURRENT_CACHE);
+    await harness.openCache("xiaohongshu-article-notes-v10");
     await harness.openCache("xiaohongshu-article-notes-v9");
     await harness.openCache("another-site-cache");
 
     await harness.activate();
 
     expect(await harness.cacheNames()).toEqual(expect.arrayContaining([CURRENT_CACHE, "another-site-cache"]));
+    expect(await harness.cacheNames()).not.toContain("xiaohongshu-article-notes-v10");
     expect(await harness.cacheNames()).not.toContain("xiaohongshu-article-notes-v9");
     expect(harness.self.clients.claim).toHaveBeenCalledOnce();
   });

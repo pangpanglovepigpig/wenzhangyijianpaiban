@@ -117,6 +117,35 @@ describe("createBlocksFromText", () => {
     );
   });
 
+  test("keeps WPS single-line paragraphs as semantic boundaries without forcing every paragraph into a section", () => {
+    const withBlankLines = `日常观察
+
+家长晚上发来一大段消息，明明已经洗漱躺下了，还是撑着眼皮回。
+
+学生一撒娇、一委屈，就想把所有问题都揽到自己身上。
+
+真正要调整的，是你对责任边界的判断。
+
+具体做法是，先判断这件事是不是必须马上回复，再决定要不要立即接住。`;
+    const withSingleLines = withBlankLines.replace(/\n\n/g, "\n");
+    const blankBlocks = createBlocksFromText(withBlankLines);
+    const singleBlocks = createBlocksFromText(withSingleLines);
+
+    expect(singleBlocks.map(({ type, text }) => ({ type, text })))
+      .toEqual(blankBlocks.map(({ type, text }) => ({ type, text })));
+    expect(types(singleBlocks)).toEqual(["h1", "hr", "p", "p", "hr", "p", "p"]);
+  });
+
+  test("recognizes a sentence-ending quotation before a WPS single newline", () => {
+    const blocks = createBlocksFromText(`表达训练
+前面连续介绍了两种常见状态，也解释了为什么容易越说越乱。
+有人开口时只会重复“我认为……我认为……”
+真正要调整的，是先找到能站住的判断。`);
+
+    expect(blocks.some((block) => block.type === "hr" && block !== blocks[1])).toBe(true);
+    expect(paragraphText(blocks)).toContain("我认为……”");
+  });
+
   test("keeps manual dividers without leading, trailing, or duplicate dividers", () => {
     const blocks = createBlocksFromText(`标题
 

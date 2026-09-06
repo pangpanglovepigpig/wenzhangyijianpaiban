@@ -12,8 +12,12 @@ export type GenerateDraftResult = {
   notice?: string;
 };
 
+export function getAiDraftEndpoint() {
+  return import.meta.env.VITE_AI_DRAFT_ENDPOINT?.trim() || "/api/generate-draft";
+}
+
 export async function generateDraftWithDeepSeek(text: string, signal?: AbortSignal): Promise<GenerateDraftResult> {
-  const response = await fetch("/api/generate-draft", {
+  const response = await fetch(getAiDraftEndpoint(), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

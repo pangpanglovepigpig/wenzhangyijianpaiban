@@ -433,10 +433,14 @@ function getTextLines(input) {
     const nonEmptyLines = rawLines.reduce((result, text, index) => {
         if (!text)
             return result;
+        const previousText = rawLines[index - 1] ?? "";
+        const nextText = rawLines[index + 1] ?? "";
         result.push({
             text,
             hasBlankBefore: index === 0 || rawLines[index - 1] === "",
             hasBlankAfter: index === rawLines.length - 1 || rawLines[index + 1] === "",
+            hasParagraphBefore: index === 0 || previousText === "" || hasCompleteLineEnding(previousText),
+            hasParagraphAfter: index === rawLines.length - 1 || nextText === "" || hasCompleteLineEnding(text),
             nonEmptyIndex: result.length,
         });
         return result;
@@ -455,6 +459,8 @@ function getTextLines(input) {
             text: joinSoftWrappedLines(paragraphLines.map((line) => line.text)),
             hasBlankBefore: firstLine.hasBlankBefore,
             hasBlankAfter: lastLine.hasBlankAfter,
+            hasParagraphBefore: firstLine.hasParagraphBefore,
+            hasParagraphAfter: lastLine.hasParagraphAfter,
         });
         paragraphLines = [];
     };
@@ -470,11 +476,14 @@ function getTextLines(input) {
             return;
         }
         paragraphLines.push(line);
-        if (line.hasBlankAfter)
+        if (line.hasParagraphAfter)
             flushParagraph();
     });
     flushParagraph();
     return lines;
+}
+function hasCompleteLineEnding(text) {
+    return /(?:[。！？!?][”’」』"'）)]*|[”’」』"])$/.test(text.trim());
 }
 function joinSoftWrappedLines(lines) {
     return lines.reduce((result, line) => {
@@ -656,7 +665,7 @@ function trimTextRange(text, start, end) {
 function shouldStartImplicitSection(blocks, hasExplicitSections, line, sectionParagraphTexts) {
     if (hasExplicitSections)
         return false;
-    if (!line.hasBlankBefore)
+    if (!line.hasParagraphBefore)
         return false;
     if (sectionParagraphTexts.length === 0)
         return false;

@@ -13,11 +13,23 @@ const LOCAL_FALLBACK_NOTICE = "AI 生成较慢或暂时不可用，已返回完�
 const SLOW_RESPONSE_ERROR = "DeepSeek 当前响应较慢或繁忙，已使用本地排版。";
 const VALID_COLORS = new Set(["red", "blue"]);
 const FALLBACKABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const GITHUB_PAGES_ORIGIN = "https://pangpanglovepigpig.github.io";
 export const config = {
   maxDuration: 60,
 };
 
 export default async function handler(req, res) {
+  const corsAllowed = applyCorsHeaders(req, res);
+  if (req.method === "OPTIONS") {
+    if (!corsAllowed) {
+      sendJson(res, 403, { error: "该网页来源未被允许调用排版接口。" });
+      return;
+    }
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
+
   if (req.method !== "POST") {
     sendJson(res, 405, { error: "请使用 POST 排版文章。" });
     return;
@@ -362,7 +374,25 @@ function countOccurrences(text, quote) {
 function sendJson(res, status, payload) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
   res.end(JSON.stringify(payload));
+}
+
+function applyCorsHeaders(req, res) {
+  const origin = getRequestHeader(req, "origin");
+  if (origin !== GITHUB_PAGES_ORIGIN) return false;
+
+  res.setHeader("Access-Control-Allow-Origin", GITHUB_PAGES_ORIGIN);
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Max-Age", "600");
+  res.setHeader("Vary", "Origin");
+  return true;
+}
+
+function getRequestHeader(req, name) {
+  const value = req?.headers?.[name] ?? req?.headers?.[name.toLowerCase()];
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function getComparableTextLength(text) {
