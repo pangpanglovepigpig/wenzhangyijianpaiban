@@ -111,7 +111,9 @@ test("finds method changes and viewpoint headings without changing their wording
   const source = "# 标题\n\n" + headings.map(h => h + "这里继续解释具体操作，以及这样安排的原因和后续步骤。").join("\n\n");
   const blocks = createBlocksFromText(source);
   expect(blocks.filter(b => b.type === "h3").map(b => b.text)).toEqual(headings);
-  expect(blocks.filter(b => b.type === "hr").length).toBeLessThan(headings.length);
+  for (const [index, block] of blocks.entries()) {
+    if (block.type === "h3") expect(blocks[index - 1]?.type).toBe("hr");
+  }
   expect(layoutPreservesSource(blocks, source)).toBe(true);
 });
 
@@ -141,4 +143,13 @@ test("retains exact inline mark boundaries in normalization and Markdown", () =>
   const manual = { ...block, highlight: true };
   expect(blocksToMarkdown([manual]).match(/<mark>/g)).toHaveLength(1);
   expect(blocksToMarkdown([manual])).not.toContain("wavy");
+});
+
+
+test("adds one divider before explicit h3 headings, including the first block", () => {
+  const source = "### 开头的三级标题\n\n这里是开头的正文解释。\n\n---\n\n### 后续的三级标题\n\n这里是后续的正文解释。";
+  const blocks = createBlocksFromText(source);
+  expect(blocks.map(b => b.type)).toEqual(["hr", "h3", "p", "hr", "h3", "p"]);
+  expect(blocks[3].dividerSource).toBe("manual");
+  expect(layoutPreservesSource(blocks, source)).toBe(true);
 });

@@ -128,6 +128,14 @@ describe("content-aware section placement", () => {
   test.each(["auto","manual"] as const)("handles %s dividers at a new page top", dividerSource => {
     const blocks = [makeBlock("intro","p","前文"),{...makeBlock("line","hr"),dividerSource},makeBlock("heading","h3","标题"),makeBlock("body","p","后文")];
     const pages=paginateBlocks(blocks,new Map([["intro",280],["line",10],["heading",30],["body",50]]),style);
-    expect(pages[1].blocks.map(b=>b.id)).toEqual(dividerSource==="auto"?["heading","body"]:["line","heading","body"]);
+    expect(pages[1].blocks.map(b=>b.id)).toEqual(["line","heading","body"]);
   });
+});
+
+
+test("still omits an automatic paragraph divider at a new page top", () => {
+  const style = resolveCardStyle({ themeId: "taro-purple", fontFamilyId: "system", baseFontSize: 16.5 });
+  const blocks = [makeBlock("intro", "p", "前文"), { ...makeBlock("line", "hr"), dividerSource: "auto" as const }, makeBlock("body", "p", "后文")];
+  const pages = paginateBlocks(blocks, new Map([["intro", style.contentHeight - 10], ["line", 20], ["body", 50]]), style);
+  expect(pages[1].blocks.map(b => b.id)).toEqual(["body"]);
 });

@@ -68,7 +68,7 @@ function buildLocalBlocks(input) {
         const type = markdown ? `h${markdown.level}` : index === 0 && isTitleLike(line, lines[index + 1])
             ? "h1" : isSubheadingLike(line, lines[index + 1]) ? "h2" : null;
         if (type) {
-            if (type !== "h3") addDividerIfNeeded(blocks);
+            addDividerIfNeeded(blocks, "auto", type === "h3");
             blocks.push(makeBlock(type, markdown?.text ?? line.text));
             sectionTexts = [];
             return;
@@ -84,8 +84,7 @@ function buildLocalBlocks(input) {
         const hasBody = structural?.remainder || (isFollowingBody(following) &&
             !splitLeadingStructuralHeading(following.text, numberedMatters.has(following.text)));
         if (structural && hasBody) {
-            const sectionLength = lengthOf(sectionTexts.join(""));
-            if (sectionLength >= 180 && /^(所以|因此|总之|反过来|接下来|最后)/.test(structural.heading)) addDividerIfNeeded(blocks);
+            addDividerIfNeeded(blocks, "auto", true);
             blocks.push(makeBlock("h3", structural.heading));
             sectionTexts = [];
             if (structural.remainder) {
@@ -329,16 +328,16 @@ export function applyRuleBasedEmphasis(blocks) {
     }
     return result;
 }
-function addDividerIfNeeded(blocks, dividerSource = "auto") {
+function addDividerIfNeeded(blocks, dividerSource = "auto", allowLeading = false) {
     const previous = blocks[blocks.length - 1];
     if (previous?.type === "hr") {
         if (dividerSource === "manual") previous.dividerSource = "manual";
-    } else if (previous) blocks.push({ ...makeBlock("hr"), dividerSource });
+    } else if (previous || allowLeading) blocks.push({ ...makeBlock("hr"), dividerSource });
 }
 function compactDividers(blocks) {
     const result = [];
-    for (const block of blocks) {
-        if (block.type !== "hr" || (result.length && result[result.length - 1].type !== "hr")) result.push(block);
+    for (const [index, block] of blocks.entries()) {
+        if (block.type !== "hr" || ((result.length || blocks[index + 1]?.type === "h3") && result[result.length - 1]?.type !== "hr")) result.push(block);
     }
     if (result[result.length - 1]?.type === "hr") result.pop();
     return result;

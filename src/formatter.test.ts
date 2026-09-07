@@ -178,7 +178,8 @@ describe("createBlocksFromText", () => {
 
 第一段正文，用来确认标题后的分隔线不会遗漏。`);
 
-    expect(blocks.slice(0, 2)).toMatchObject([
+    expect(blocks.slice(0, 3)).toMatchObject([
+      { type: "hr" },
       { type: "h3", text: "三级写法的主标题" },
       { type: "p" },
     ]);
@@ -186,7 +187,7 @@ describe("createBlocksFromText", () => {
 
   test("matches the approved Zhuhai section structure without changing source text", () => {
     const blocks = createBlocksFromText(zhuhaiArticle);
-    const headings = blocks.filter((block, index) => block.type === "h3" && index > 0).map((block) => block.text);
+    const headings = blocks.filter(block => block.type === "h3").map((block) => block.text);
     const reconstructed = blocks
       .filter((block) => block.type !== "hr")
       .map((block) => block.text)
@@ -240,7 +241,7 @@ describe("createBlocksFromText", () => {
 
   test("creates the approved Shenzhen sections and keeps every source character", () => {
     const blocks = createBlocksFromText(shenzhenArticle);
-    const headings = blocks.filter((block, index) => block.type === "h3" && index > 0).map((block) => block.text);
+    const headings = blocks.filter(block => block.type === "h3").slice(1).map((block) => block.text);
     const reconstructed = blocks
       .filter((block) => block.type !== "hr")
       .map((block) => block.text)
@@ -257,7 +258,7 @@ describe("createBlocksFromText", () => {
   test("recognizes only complete ordered groups of numbered matters", () => {
     const blocks = createBlocksFromText(xiaomianArticle);
 
-    expect(blocks.filter((block, index) => block.type === "h3" && index > 0).map((block) => block.text)).toEqual(xiaomianLocalHeadings);
+    expect(blocks.filter(block => block.type === "h3").slice(1).map((block) => block.text)).toEqual(xiaomianLocalHeadings);
     expect(hrCount(blocks)).toBeLessThanOrEqual(6);
 
     const numeric = createBlocksFromText(`### 数字序列
@@ -281,10 +282,10 @@ describe("createBlocksFromText", () => {
 
 第四件事，是补充一个单独事项。后面继续解释补充内容。`);
 
-    expect(numeric.filter((block, index) => block.type === "h3" && index > 0)).toHaveLength(2);
-    expect(isolated.filter((block, index) => block.type === "h3" && index > 0)).toHaveLength(0);
-    expect(broken.filter((block, index) => block.type === "h3" && index > 0)).toHaveLength(0);
-    expect(groupedThenBroken.filter((block, index) => block.type === "h3" && index > 0).map((block) => block.text)).toEqual([
+    expect(numeric.filter(block => block.type === "h3").slice(1)).toHaveLength(2);
+    expect(isolated.filter(block => block.type === "h3").slice(1)).toHaveLength(0);
+    expect(broken.filter(block => block.type === "h3").slice(1)).toHaveLength(0);
+    expect(groupedThenBroken.filter(block => block.type === "h3").slice(1).map((block) => block.text)).toEqual([
       "第一件事，是先处理眼前的问题。",
       "第二件事，是再完成一次验证。",
     ]);

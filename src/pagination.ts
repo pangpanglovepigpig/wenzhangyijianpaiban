@@ -82,7 +82,7 @@ export function paginateBlocks(
   };
 
   while (index < queue.length) {
-    if (!current.length && queue[index].type === "hr" && queue[index].dividerSource === "auto") {
+    if (!current.length && queue[index].type === "hr" && queue[index].dividerSource === "auto" && queue[index + 1]?.type !== "h3") {
       index += 1;
       continue;
     }

@@ -74,6 +74,9 @@ try {
       for (const p of pages) {
         const used = p.blocks.reduce((sum, b) => sum + measured.get(b.id), 0);
         if (used > style.contentHeight + 0.01) throw new Error('Page overflow: ' + theme.id);
+        for (let i = 0; i < p.blocks.length; i++) {
+          if (p.blocks[i].type === 'h3' && p.blocks[i - 1]?.type !== 'hr') throw new Error('Missing h3 divider: ' + theme.id);
+        }
         if (pages.indexOf(p) < pages.length - 1 && /^(?:hr|h[123])$/.test(p.blocks[p.blocks.length - 1].type)) throw new Error('Orphan heading: ' + theme.id);
       }
       checkedPages += pages.length;
