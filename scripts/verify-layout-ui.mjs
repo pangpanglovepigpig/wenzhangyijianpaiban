@@ -4,6 +4,11 @@ import { createServer } from "vite";
 import { buildSentenceIndex, createBlocksFromText, applyStructureSuggestions } from "../shared/articleStructure.js";
 
 process.env.VITE_ENABLE_AI_DRAFT = "true";
+const mode = process.env.LAYOUT_QA_MODE || "normal";
+if (!["normal", "hang", "body-stall", "unavailable", "timeout-then-success"].includes(mode)) {
+  throw new Error("Unknown LAYOUT_QA_MODE");
+}
+let requestCount = 0;
 const server = await createServer({
   server: { host: "127.0.0.1", port: 4175, strictPort: true },
   plugins: [{
@@ -14,6 +19,18 @@ const server = await createServer({
           const chunks = [];
           for await (const chunk of req) chunks.push(chunk);
           const { text } = JSON.parse(Buffer.concat(chunks).toString());
+          requestCount += 1;
+          if (mode === "hang" || (mode === "timeout-then-success" && requestCount === 1)) return;
+          if (mode === "body-stall") {
+            res.setHeader("Content-Type", "application/json");
+            res.write('{"blocks":');
+            return;
+          }
+          if (mode === "unavailable") {
+            res.statusCode = 503;
+            res.end(JSON.stringify({ error: "AI 服务暂时不可用，请稍后重试。" }));
+            return;
+          }
           const { huizhouStructure } = await vite.ssrLoadModule("/src/testFixtures.ts");
           const sentences = buildSentenceIndex(text);
           const structure = huizhouStructure.flatMap(({ quote, action }) => {

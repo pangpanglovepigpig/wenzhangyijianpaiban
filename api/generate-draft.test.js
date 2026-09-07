@@ -44,6 +44,7 @@ function createResponseRecorder() {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   delete process.env.DEEPSEEK_API_KEY;
   delete process.env.DEEPSEEK_TIMEOUT_MS;
@@ -287,7 +288,7 @@ describe("compact AI style suggestions", () => {
   });
 });
 
-describe("AI endpoint degradation", () => {
+describe("AI endpoint deadlines and failures", () => {
   test("accepts GitHub Pages preflight with a restricted origin", async () => {
     const recorder = createResponseRecorder();
     await handler({
@@ -328,25 +329,36 @@ describe("AI endpoint degradation", () => {
     expect(recorder.getPayload().error).toContain("DEEPSEEK_API_KEY");
   });
 
-  test("aborts at 25 seconds and returns the complete local layout without leaking source or keys", async () => {
+  test.each(["request", "body"])("ends a hung upstream %s at 55 seconds even if abort is ignored", async (phase) => {
     vi.useFakeTimers();
     process.env.DEEPSEEK_API_KEY = "secret-do-not-log";
+    process.env.DEEPSEEK_TIMEOUT_MS = "180000"; // An oversized deployment setting cannot defeat the cap.
     const log = vi.spyOn(console, "info").mockImplementation(() => {});
-    vi.stubGlobal("fetch", vi.fn((_url, { signal }) => new Promise((_resolve, reject) => {
-      signal.addEventListener("abort", () => reject(Object.assign(new Error("abort"), { name: "AbortError" })));
-    })));
+    let signal;
+    const fetchMock = vi.fn((_url, options) => {
+      signal = options.signal;
+      return phase === "request" ? new Promise(() => {}) : Promise.resolve({
+        ok: true, status: 200, text: () => new Promise(() => {}),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
     const recorder = createResponseRecorder();
     const run = handler({ method: "POST", body: { text: shenzhenArticle } }, recorder.response);
-    await vi.advanceTimersByTimeAsync(24999);
+    await vi.advanceTimersByTimeAsync(54999);
     expect(recorder.getPayload()).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
     await run;
-    expect(recorder.response.statusCode).toBe(200);
-    expect(recorder.getPayload().blocks).toEqual(createSourcePreservingDraft(shenzhenArticle).blocks);
-    expect(recorder.getPayload().notice).toContain("本地排版");
+    expect(signal.aborted).toBe(true);
+    expect(recorder.response.statusCode).toBe(504);
+    expect(recorder.getPayload()).toEqual({ error: "AI 排版超时，请重试" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(log).toHaveBeenCalledWith("article_layout", expect.objectContaining({
+      phase: phase === "request" ? "upstream_request" : "upstream_body", reason: "timeout", durationMs: 55000,
+    }));
     expect(JSON.stringify(log.mock.calls)).not.toContain("secret-do-not-log");
     expect(JSON.stringify(log.mock.calls)).not.toContain("深圳");
-    log.mockRestore();
+    expect(recorder.response.setHeader).toHaveBeenCalledWith("Server-Timing", "layout;dur=55000");
   });
 
   test("reports all-rejected structure while keeping a valid style", async () => {
@@ -364,13 +376,15 @@ describe("AI endpoint degradation", () => {
     expect(recorder.getPayload().blocks.some((b) => b.segments?.some((s) => s.color === "blue"))).toBe(true);
   });
 
-  test.each([408, 429, 500, 501, 502, 503, 504, 599])("degrades transient HTTP %i", async (status) => {
+  test.each([408, 429, 500, 501, 502, 503, 504, 599])("reports transient HTTP %i without local fallback or retries", async (status) => {
     process.env.DEEPSEEK_API_KEY = "test-key";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("busy", { status })));
     const recorder = createResponseRecorder();
     await handler({ method: "POST", body: { text: shenzhenArticle } }, recorder.response);
-    expect(recorder.response.statusCode).toBe(200);
-    expect(recorder.getPayload().notice).toContain("本地排版");
+    expect(recorder.response.statusCode).toBe(status === 408 || status === 504 ? 504 : 503);
+    expect(recorder.getPayload().blocks).toBeUndefined();
+    expect(recorder.getPayload().error).toBeTruthy();
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   test.each([401, 403])("keeps configuration HTTP %i as an error without echoing provider content", async (status) => {
@@ -381,7 +395,7 @@ describe("AI endpoint degradation", () => {
     expect(recorder.response.statusCode).toBe(502);
     expect(recorder.getPayload().error).not.toContain("sensitive");
   });
-  test("returns the complete local Shenzhen layout when AI JSON is invalid", async () => {
+  test("reports invalid AI JSON without returning a substitute layout", async () => {
     process.env.DEEPSEEK_API_KEY = "test-key";
     vi.stubGlobal(
       "fetch",
@@ -394,13 +408,11 @@ describe("AI endpoint degradation", () => {
     await handler({ method: "POST", body: { text: shenzhenArticle } }, recorder.response);
 
     const payload = recorder.getPayload();
-    expect(recorder.response.statusCode).toBe(200);
-    expect(payload.notice).toContain("本地排版");
-    expect(payload.blocks.filter((block) => block.type === "hr")).toHaveLength(7);
-    expect(payload.blocks.filter((block) => block.type === "h3").map((block) => block.text)).toEqual(shenzhenHeadings);
+    expect(recorder.response.statusCode).toBe(502);
+    expect(payload).toEqual({ error: "AI 返回格式异常，请重试。" });
   });
 
-  test("returns local blocks when the DeepSeek request times out", async () => {
+  test("reports an aborted upstream as a timeout", async () => {
     process.env.DEEPSEEK_API_KEY = "test-key";
     const abortError = Object.assign(new Error("aborted"), { name: "AbortError" });
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abortError));
@@ -408,9 +420,31 @@ describe("AI endpoint degradation", () => {
 
     await handler({ method: "POST", body: { text: articleForTimeout } }, recorder.response);
 
-    expect(recorder.response.statusCode).toBe(200);
-    expect(recorder.getPayload().notice).toContain("本地排版");
-    expect(recorder.getPayload().blocks[0]).toMatchObject({ type: "h1", text: "超时测试" });
+    expect(recorder.response.statusCode).toBe(504);
+    expect(recorder.getPayload()).toEqual({ error: "AI 排版超时，请重试" });
+  });
+
+  test("reports connection failures without exposing exception details", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("secret-provider-details")));
+    const recorder = createResponseRecorder();
+    await handler({ method: "POST", body: { text: shenzhenArticle } }, recorder.response);
+    expect(recorder.response.statusCode).toBe(502);
+    expect(recorder.getPayload()).toEqual({ error: "AI 连接失败，请稍后重试。" });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret-provider-details");
+  });
+
+  test.each([
+    ["empty", { choices: [] }],
+    ["truncated", { choices: [{ finish_reason: "length", message: { content: '{"structure":[]}' } }] }],
+  ])("reports %s provider output as a failure", async (_label, payload) => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(payload))));
+    const recorder = createResponseRecorder();
+    await handler({ method: "POST", body: { text: shenzhenArticle } }, recorder.response);
+    expect(recorder.response.statusCode).toBe(502);
+    expect(Object.keys(recorder.getPayload())).toEqual(["error"]);
   });
 
   test("uses the compact request contract and fixed output budget", async () => {
@@ -480,4 +514,4 @@ const structureForEndpoint = [
 
 const articleForTimeout = `### 超时测试
 
-这是一段用于验证超时降级的正文内容。`;
+这是一段用于验证超时错误的正文内容。`;

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createBlocksFromText, buildSentenceIndex, applyStructureSuggestions, applyRuleBasedEmphasis, draftPreservesSource } from "../shared/articleStructure.js";
 
 const DEEPSEEK_ENDPOINT = "https://api.deepseek.com/chat/completions";
@@ -7,12 +8,10 @@ const MAX_BLOCKS = 600;
 const MAX_AI_STYLES = 14;
 const MIN_AI_QUOTE_LENGTH = 6;
 const MAX_AI_QUOTE_LENGTH = 60;
-const DEFAULT_REQUEST_TIMEOUT_MS = 25000;
-const MAX_REQUEST_TIMEOUT_MS = 25000;
-const LOCAL_FALLBACK_NOTICE = "AI 生成较慢或暂时不可用，已返回完整的本地排版。";
-const SLOW_RESPONSE_ERROR = "DeepSeek 当前响应较慢或繁忙，已使用本地排版。";
+const DEFAULT_REQUEST_TIMEOUT_MS = 55000;
+const MAX_REQUEST_TIMEOUT_MS = 55000;
+const SLOW_RESPONSE_ERROR = "AI 排版超时，请重试";
 const VALID_COLORS = new Set(["red", "blue"]);
-const FALLBACKABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 const GITHUB_PAGES_ORIGIN = "https://pangpanglovepigpig.github.io";
 export const config = {
   maxDuration: 60,
@@ -35,69 +34,71 @@ export default async function handler(req, res) {
     return;
   }
 
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    sendJson(res, 500, { error: "还没有配置 DEEPSEEK_API_KEY。" });
-    return;
-  }
+  const started = Date.now();
+  const requestId = randomUUID();
+  const diagnostics = { phase: "validation", reason: "ok" };
+  const structureStats = { accepted: 0, rejected: 0, reasons: {} };
+  const styleStats = { accepted: 0, rejected: 0, reasons: {} };
+  const finish = (status, payload) => {
+    const durationMs = Date.now() - started;
+    res.setHeader("Server-Timing", `layout;dur=${durationMs}`);
+    res.setHeader("X-Layout-Request-Id", requestId);
+    // Only fixed categories, counts and timings: never article/provider text or credentials.
+    console.info("article_layout", {
+      requestId, outcome: status === 200 ? "ai" : "error", status, durationMs,
+      ...diagnostics, structure: structureStats, styles: styleStats,
+    });
+    sendJson(res, status, payload);
+  };
 
   try {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) throw new DeepSeekRequestError("还没有配置 DEEPSEEK_API_KEY。", "missing_api_key", 500);
     const body = await readJsonBody(req);
     const text = typeof body?.text === "string" ? body.text.trim() : "";
-
-    if (!text) {
-      sendJson(res, 400, { error: "请先输入文章内容。" });
-      return;
-    }
-
+    if (!text) throw new DeepSeekRequestError("请先输入文章内容。", "empty_input", 400);
     if (text.length > MAX_INPUT_LENGTH) {
-      sendJson(res, 413, { error: `文章太长了，请控制在 ${MAX_INPUT_LENGTH} 字以内。` });
-      return;
+      throw new DeepSeekRequestError(`文章太长了，请控制在 ${MAX_INPUT_LENGTH} 字以内。`, "input_too_long", 413);
     }
 
-    const localDraft = createSourcePreservingDraft(text);
-    let blocks = localDraft.blocks;
+    let blocks = createSourcePreservingDraft(text).blocks;
     let notice;
-    const started = Date.now();
-    const structureStats = { accepted: 0, rejected: 0, reasons: {} };
-    const styleStats = { accepted: 0, rejected: 0, reasons: {} };
-    let outcome = "ai";
-
-    try {
-      const enhancements = await requestDeepSeekEnhancements(text, apiKey);
-      blocks = applyStructureSuggestions(blocks, enhancements.structure, text, structureStats);
-      blocks = applyStyleSuggestions(blocks, enhancements.styles, text, styleStats);
-      blocks = applyRuleBasedEmphasis(blocks);
-      if (enhancements.structure.length && structureStats.accepted === 0) {
-        notice = "AI 分区建议未通过原文安全校验，已保留完整本地结构和有效重点样式。";
-      } else if (!enhancements.structure.length) {
-        notice = "AI 本次未建议新增分区，已保留本地结构和有效重点样式。";
-      }
-    } catch (error) {
-      if (!isFallbackableDeepSeekError(error)) throw error;
-      notice = LOCAL_FALLBACK_NOTICE;
-      outcome = "local_fallback";
+    const enhancements = await requestDeepSeekEnhancements(text, apiKey, diagnostics);
+    diagnostics.phase = "layout_validation";
+    blocks = applyStructureSuggestions(blocks, enhancements.structure, text, structureStats);
+    blocks = applyStyleSuggestions(blocks, enhancements.styles, text, styleStats);
+    blocks = applyRuleBasedEmphasis(blocks);
+    if (enhancements.structure.length && structureStats.accepted === 0) {
+      notice = "AI 分区建议未通过原文安全校验，已保留完整本地结构和有效重点样式。";
+    } else if (!enhancements.structure.length) {
+      notice = "AI 本次未建议新增分区，已保留本地结构和有效重点样式。";
     }
-    // Never log article text, model content, request headers or credentials.
-    console.info("article_layout", { outcome, durationMs: Date.now() - started, structure: structureStats, styles: styleStats });
-
     if (!blocks.length || blocks.length > MAX_BLOCKS || !draftPreservesSource(blocks, text)) {
-      throw new Error("本地排版没有完整保留原文，请刷新后重试。");
+      throw new DeepSeekRequestError("排版没有完整保留原文，请重试。", "source_validation");
     }
-
-    sendJson(res, 200, notice ? { blocks, notice } : { blocks });
+    diagnostics.phase = "complete";
+    finish(200, notice ? { blocks, notice } : { blocks });
   } catch (error) {
-    sendJson(res, 502, {
-      error: error instanceof Error ? error.message : "DeepSeek 生成失败，请稍后再试。",
+    diagnostics.reason = error instanceof DeepSeekRequestError ? error.code : "internal_error";
+    finish(error instanceof DeepSeekRequestError ? error.status : 502, {
+      error: error instanceof DeepSeekRequestError ? error.message : "AI 排版失败，请重试。",
     });
   }
 }
 
-async function requestDeepSeekEnhancements(text, apiKey) {
+async function requestDeepSeekEnhancements(text, apiKey, diagnostics) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), getRequestTimeoutMs());
-
-  try {
+  const started = Date.now();
+  let timeout;
+  const expired = new Promise((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      const error = new DeepSeekRequestError(SLOW_RESPONSE_ERROR, "timeout", 504);
+      reject(error);
+      controller.abort(error);
+    }, getRequestTimeoutMs());
+  });
+  const perform = async () => {
+    diagnostics.phase = "upstream_request";
     const response = await fetch(DEEPSEEK_ENDPOINT, {
       method: "POST",
       headers: {
@@ -142,65 +143,68 @@ async function requestDeepSeekEnhancements(text, apiKey) {
       signal: controller.signal,
     });
 
-    const responseText = await response.text();
+    diagnostics.upstreamHeadersMs = Date.now() - started;
+    diagnostics.upstreamStatus = response.status;
+    if (controller.signal.aborted) throw controller.signal.reason;
     if (!response.ok) {
+      // Error bodies can themselves hang; status is sufficient and their content is private.
+      void response.body?.cancel().catch(() => {});
       if (response.status === 429) {
-        throw new DeepSeekRequestError(
-          "DeepSeek 当前请求过于频繁或额度受限，已使用本地排版。",
-          true,
-        );
+        throw new DeepSeekRequestError("AI 服务繁忙或额度受限，请稍后重试。", "upstream_rate_limit", 503);
       }
-
-      if (FALLBACKABLE_STATUSES.has(response.status) || response.status >= 500) {
-        throw new DeepSeekRequestError(SLOW_RESPONSE_ERROR, true);
+      if (response.status === 408 || response.status === 504) {
+        throw new DeepSeekRequestError(SLOW_RESPONSE_ERROR, "upstream_timeout", 504);
       }
-
-      throw new DeepSeekRequestError(
-        `DeepSeek 请求失败：${response.status}，请检查服务端配置。`,
-        false,
-      );
+      if (response.status >= 500) {
+        throw new DeepSeekRequestError("AI 服务暂时不可用，请稍后重试。", "upstream_unavailable", 503);
+      }
+      throw new DeepSeekRequestError(`DeepSeek 请求失败：${response.status}，请检查服务端配置。`, "upstream_configuration");
     }
-
+    diagnostics.phase = "upstream_body";
+    const responseText = await response.text();
+    if (controller.signal.aborted) throw controller.signal.reason;
+    diagnostics.phase = "upstream_validation";
     const data = safeParseJson(responseText);
     const choice = data?.choices?.[0];
     const content = choice?.message?.content;
     if (typeof content !== "string" || !content.trim()) {
-      throw new DeepSeekRequestError("DeepSeek 返回内容为空，这次没有生成初稿。请再试一次。", true);
+      throw new DeepSeekRequestError("AI 返回内容为空，请重试。", "empty_response");
     }
 
     if (choice?.finish_reason === "length") {
-      throw new DeepSeekRequestError("DeepSeek 返回内容被截断，这次没有生成初稿。请缩短原文后再试一次。", true);
+      throw new DeepSeekRequestError("AI 返回内容不完整，请重试。", "truncated_response");
     }
 
     const enhancements = parseDraftEnhancements(content);
     if (!enhancements) {
-      throw new DeepSeekRequestError("DeepSeek 返回格式异常，已使用本地排版。", true);
+      throw new DeepSeekRequestError("AI 返回格式异常，请重试。", "invalid_response");
     }
 
     return enhancements;
+  };
+  try {
+    return await Promise.race([perform(), expired]);
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new DeepSeekRequestError(SLOW_RESPONSE_ERROR, true);
+      throw new DeepSeekRequestError(SLOW_RESPONSE_ERROR, "timeout", 504);
     }
     if (error instanceof TypeError) {
-      throw new DeepSeekRequestError("AI 连接暂时不可用，已使用本地排版。", true);
+      throw new DeepSeekRequestError("AI 连接失败，请稍后重试。", "network_error");
     }
     throw error;
   } finally {
     clearTimeout(timeout);
+    diagnostics.upstreamDurationMs = Date.now() - started;
   }
 }
 
 class DeepSeekRequestError extends Error {
-  constructor(message, fallbackable = false) {
+  constructor(message, code, status = 502) {
     super(message);
     this.name = "DeepSeekRequestError";
-    this.fallbackable = fallbackable;
+    this.code = code;
+    this.status = status;
   }
-}
-
-function isFallbackableDeepSeekError(error) {
-  return error instanceof DeepSeekRequestError && error.fallbackable === true;
 }
 
 function getRequestTimeoutMs() {
@@ -383,6 +387,7 @@ function applyCorsHeaders(req, res) {
   if (origin !== GITHUB_PAGES_ORIGIN) return false;
 
   res.setHeader("Access-Control-Allow-Origin", GITHUB_PAGES_ORIGIN);
+  res.setHeader("Access-Control-Expose-Headers", "Server-Timing, X-Layout-Request-Id");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Access-Control-Max-Age", "600");

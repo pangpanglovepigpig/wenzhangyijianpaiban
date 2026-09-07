@@ -19,6 +19,7 @@ import { downloadImage, downloadImagesSequentially, type DownloadProgress } from
 import { blocksToMarkdown, createBlocksFromText, IMAGE_CONFIG, makeBlock, sampleArticle } from "./formatter";
 import { paginateBlocks } from "./pagination";
 import { DraftRequest } from "./draftRequest";
+import { generateDraftWithDeepSeek } from "./draftApi";
 import {
   DEFAULT_CARD_STYLE,
   FONT_OPTIONS,
@@ -133,11 +134,7 @@ export function App() {
     setDraftNotice(null);
 
     await draftRequestRef.current.run(
-      async (signal) => {
-        const { generateDraftWithDeepSeek } = await import("./draftApi");
-        if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
-        return generateDraftWithDeepSeek(requestedText, signal);
-      },
+      (signal) => generateDraftWithDeepSeek(requestedText, signal),
       (result) => {
         setBlocks(result.blocks);
         setSelectedId(result.blocks[0]?.id ?? null);
@@ -270,7 +267,7 @@ export function App() {
 
           <div className="draft-notice" role="status">
             {ENABLE_AI_DRAFT
-              ? (isDraftGenerating ? "正在判断分区、三级标题和重点，完成后一次性更新；最长等待约 25 秒。" : "AI 排版：自动判断分区、三级标题和重点。")
+              ? (isDraftGenerating ? "正在判断分区、三级标题和重点，完成后一次性更新；最多等待一分钟，超时将提示失败。" : "AI 排版：自动判断分区、三级标题和重点。")
               : <>本地排版，无 AI。<a href="https://wenzhangyijianpaiban.vercel.app/" target="_blank" rel="noreferrer">前往正式站使用 AI 排版</a></>}
           </div>
           <textarea

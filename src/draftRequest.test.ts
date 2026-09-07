@@ -1,5 +1,7 @@
-import { describe, expect, test, vi } from "vitest";
-import { DraftRequest } from "./draftRequest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { DraftRequest, DraftTimeoutError } from "./draftRequest";
+
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -67,5 +69,72 @@ describe("atomic AI layout request", () => {
     expect(commit).not.toHaveBeenCalled();
     expect(fail).toHaveBeenCalledExactlyOnceWith(error);
     expect(request.pending).toBe(false);
+  });
+});
+
+
+describe("end-to-end deadline", () => {
+  test("releases busy at one minute even when cancellation is ignored, then ignores a late result during retry", async () => {
+    vi.useFakeTimers();
+    const request = new DraftRequest();
+    const old = deferred<string>();
+    const next = deferred<string>();
+    const commit = vi.fn();
+    const fail = vi.fn();
+    const busy = vi.fn();
+    let signal!: AbortSignal;
+    const first = request.run((s) => { signal = s; return old.promise; }, commit, fail, busy);
+    await vi.advanceTimersByTimeAsync(59999);
+    expect(request.pending).toBe(true);
+    expect(fail).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await first;
+    expect(signal.aborted).toBe(true);
+    expect(fail).toHaveBeenCalledExactlyOnceWith(expect.any(DraftTimeoutError));
+    expect(fail.mock.calls[0][0].message).toBe("AI 排版超时，请重试");
+    expect(busy.mock.calls).toEqual([[true], [false]]);
+    expect(request.pending).toBe(false);
+    const second = request.run(() => next.promise, commit, fail, busy);
+    old.resolve("stale");
+    await Promise.resolve();
+    expect(commit).not.toHaveBeenCalled();
+    expect(request.pending).toBe(true);
+    next.resolve("new");
+    await second;
+    expect(commit).toHaveBeenCalledExactlyOnceWith("new");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("cancellation settles an uncooperative task immediately and removes its deadline", async () => {
+    vi.useFakeTimers();
+    const request = new DraftRequest();
+    const fail = vi.fn();
+    const busy = vi.fn();
+    const run = request.run(() => new Promise(() => {}), vi.fn(), fail, busy);
+    request.cancel();
+    await run;
+    await vi.advanceTimersByTimeAsync(180000);
+    expect(fail).not.toHaveBeenCalled();
+    expect(busy.mock.calls).toEqual([[true], [false]]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test.each(["resolve", "resume"])("rejects an overdue %s when background timers were suspended", async (action) => {
+    vi.useFakeTimers();
+    const page = new EventTarget();
+    vi.stubGlobal("document", page);
+    const request = new DraftRequest();
+    const pending = deferred<string>();
+    const commit = vi.fn();
+    const fail = vi.fn();
+    const run = request.run(() => pending.promise, commit, fail, vi.fn());
+    vi.setSystemTime(Date.now() + 61000);
+    if (action === "resolve") pending.resolve("late");
+    else page.dispatchEvent(new Event("visibilitychange"));
+    await run;
+    expect(fail).toHaveBeenCalledWith(expect.any(DraftTimeoutError));
+    expect(commit).not.toHaveBeenCalled();
+    expect(request.pending).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
