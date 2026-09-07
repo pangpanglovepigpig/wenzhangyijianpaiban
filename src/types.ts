@@ -26,6 +26,7 @@ export interface ContentBlock {
   type: BlockType;
   text: string;
   segments?: TextSegment[];
+  dividerSource?: "auto" | "manual";
   highlight: boolean;
   underline: boolean;
 }
@@ -34,6 +35,8 @@ export interface TextSegment {
   text: string;
   bold?: boolean;
   color?: InlineColor;
+  highlight?: boolean;
+  underline?: boolean;
 }
 
 export interface RenderConfig {

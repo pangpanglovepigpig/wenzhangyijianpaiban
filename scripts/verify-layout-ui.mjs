@@ -18,11 +18,11 @@ const url = target || 'http://127.0.0.1:4175/';
 const runtime = await build({ stdin: { contents: `
   import { createBlocksFromText, formatArticle } from './src/formatter';
   import { layoutPreservesSource } from './shared/articleStructure.js';
-  import { prepareBlocksForPng } from './src/exportImage';
+  import { prepareBlocksForPng, measureBlocksForPng } from './src/exportImage';
   import { paginateBlocks } from './src/pagination';
   import { resolveCardStyle, THEME_OPTIONS } from './src/cardStyle';
   import { shenzhenArticle, xiaomianArticle, huizhouArticle } from './src/testFixtures';
-  window.layoutQA = { createBlocksFromText, formatArticle, layoutPreservesSource, prepareBlocksForPng,
+  window.layoutQA = { createBlocksFromText, formatArticle, layoutPreservesSource, prepareBlocksForPng, measureBlocksForPng,
     paginateBlocks, resolveCardStyle, THEME_OPTIONS, articles: [shenzhenArticle, xiaomianArticle, huizhouArticle] };
 `, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'iife', target: 'es2020' });
 const browser = await pw.chromium.launch({ headless: true });
@@ -68,10 +68,11 @@ try {
       const blocks = q.createBlocksFromText(article);
       const style = q.resolveCardStyle({ themeId: theme.id, fontFamilyId: 'system', baseFontSize: size });
       const fitted = q.prepareBlocksForPng(blocks, style);
-      const pages = q.paginateBlocks(fitted.blocks, fitted.heights, style);
+      const pages = q.paginateBlocks(fitted.blocks, fitted.heights, style, fitted.splitParagraph);
       if (!q.layoutPreservesSource(pages.flatMap(p => p.blocks), article)) throw new Error('Page text mismatch: ' + theme.id);
+      const measured = q.measureBlocksForPng(pages.flatMap(p => p.blocks), style);
       for (const p of pages) {
-        const used = p.blocks.reduce((sum, b) => sum + fitted.heights.get(b.id), 0);
+        const used = p.blocks.reduce((sum, b) => sum + measured.get(b.id), 0);
         if (used > style.contentHeight + 0.01) throw new Error('Page overflow: ' + theme.id);
         if (pages.indexOf(p) < pages.length - 1 && /^(?:hr|h[123])$/.test(p.blocks[p.blocks.length - 1].type)) throw new Error('Orphan heading: ' + theme.id);
       }

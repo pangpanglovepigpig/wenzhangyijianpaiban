@@ -216,7 +216,7 @@ describe("createBlocksFromText", () => {
 
     expect(highlighted.length).toBeLessThanOrEqual(3);
     expect(underlined.length).toBeLessThanOrEqual(3);
-    expect(stance?.color).toBe("blue");
+    expect(stance?.highlight).toBe(true);
     expect(uncertainty?.underline).toBe(false);
     expect(blocks.every((block) => !(block.highlight && block.underline))).toBe(true);
   });

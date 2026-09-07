@@ -1,6 +1,6 @@
 import { CARD_HEIGHT, CARD_WIDTH, type ResolvedCardStyle, type TextRoleStyle } from "./cardStyle";
 import type { ContentBlock, InlineColor, PageModel, TextSegment } from "./types";
-import { fitBlocksForPages } from "./pagination";
+import { fitBlocksForPages, sliceBlock, type SplitParagraph } from "./pagination";
 import { splitTextGraphemes } from "./textUnits";
 
 const EXPORT_SCALE = 2;
@@ -30,6 +30,8 @@ type TextRun = {
   text: string;
   bold?: boolean;
   color?: InlineColor;
+  highlight?: boolean;
+  underline?: boolean;
 };
 
 type RichLine = {
@@ -90,7 +92,27 @@ export function prepareBlocksForPng(blocks: ContentBlock[], cardStyle: ResolvedC
   if (!ctx) throw new Error("Canvas is unavailable.");
   const measure = (block: ContentBlock) => measureBlockHeight(ctx, block, cardStyle);
   const fitted = fitBlocksForPages(blocks, measure, cardStyle.contentHeight);
-  return { blocks: fitted, heights: new Map(fitted.map(block => [block.id, measure(block)])) };
+  const splitParagraph: SplitParagraph = (block, available) => {
+    if (block.type !== "p" || available <= 0) return null;
+    const options = getTextOptions(block, 0, cardStyle);
+    const box = getTextBox(options);
+    const width = box.width - options.roleStyle.borderLeftWidth - options.roleStyle.paddingLeft - options.roleStyle.paddingRight;
+    const lines = wrapRichText(ctx, block, options, width);
+    // Keep at least two actual rendered lines with a heading. Never split by
+    // guessed character counts, which vary with themes, fonts and inline styles.
+    let offset = 0, best = 0;
+    for (let index = 0; index < lines.length - 1; index += 1) {
+      offset += lines[index].text.length;
+      if (index < 1) continue;
+      if (measure(sliceBlock(block, 0, offset)) <= available) best = offset;
+      else break;
+    }
+    if (!best) return null;
+    const head = { ...sliceBlock(block, 0, best), id: `${block.id}-head-${best}` };
+    const tail = { ...sliceBlock(block, best, block.text.length), id: `${block.id}-tail-${best}` };
+    return { head, tail, headHeight: measure(head), tailHeight: measure(tail) };
+  };
+  return { blocks: fitted, heights: new Map(fitted.map(block => [block.id, measure(block)])), splitParagraph };
 }
 
 function measureBlockHeight(
@@ -960,7 +982,7 @@ function drawWrappedText(ctx: CanvasRenderingContext2D, block: ContentBlock, opt
       : lineTop;
     const lineWidth = Math.min(line.width, textMaxWidth);
     const lineX = box.align === "center" ? textX + (textMaxWidth - lineWidth) / 2 : textX;
-    drawRichLine(ctx, line, lineX, lineY, options);
+    drawRichLine(ctx, line, lineX, lineY, options, lineTop);
     if (options.underline) {
       drawWavyUnderline(
         ctx,
@@ -2166,14 +2188,24 @@ function drawRichLine(
   x: number,
   y: number,
   options: DrawTextOptions,
+  lineTop: number,
 ) {
   let currentX = x;
-
   line.runs.forEach((run) => {
     ctx.font = getRunFont(run, options);
+    const width = ctx.measureText(run.text).width;
+    if (run.highlight && !options.highlight && !options.underline) {
+      const rect = getHighlightRect(ctx, run.text, lineTop, options);
+      ctx.fillStyle = options.highlightColor;
+      ctx.fillRect(currentX - 1, rect.y, width + 2, rect.height);
+    }
     ctx.fillStyle = run.color ? options.inlineColors[run.color] : options.color;
     ctx.fillText(run.text, currentX, y);
-    currentX += ctx.measureText(run.text).width;
+    if (run.underline && !options.highlight && !options.underline) {
+      drawWavyUnderline(ctx, currentX, lineTop + options.lineHeight - options.underlineOffset,
+        width, options.underlineColor, options.underlineThickness);
+    }
+    currentX += width;
   });
 }
 
@@ -2184,14 +2216,17 @@ function getBlockSegments(block: ContentBlock): TextSegment[] {
     .map((segment) => ({
       text: segment.text,
       bold: segment.bold || undefined,
-      color: segment.color === "red" || segment.color === "blue" ? segment.color : undefined,
+      color: !block.highlight && !block.underline && !segment.highlight && !segment.underline &&
+        (segment.color === "red" || segment.color === "blue") ? segment.color : undefined,
+      highlight: !block.highlight && !block.underline && segment.highlight || undefined,
+      underline: !block.highlight && !block.underline && !segment.highlight && segment.underline || undefined,
     }))
     .filter((segment) => segment.text.length > 0);
 }
 
 function appendRun(runs: TextRun[], run: TextRun) {
   const previous = runs[runs.length - 1];
-  if (previous && previous.bold === run.bold && previous.color === run.color) {
+  if (previous && previous.bold === run.bold && previous.color === run.color && previous.highlight === run.highlight && previous.underline === run.underline) {
     previous.text += run.text;
     return;
   }

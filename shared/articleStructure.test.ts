@@ -4,7 +4,7 @@ import { huizhouArticle, shenzhenArticle, xiaomianArticle } from "../src/testFix
 
 const bodyText = (source: string) => createBlocksFromText(source).filter(b => b.type !== "hr").map(b => b.text).join("");
 const body = (source: string) => createBlocksFromText(source).filter(b => b.type === "p");
-const marked = (source: string) => body(source).flatMap(b => b.segments ?? []).filter(s => s.color || s.bold);
+const marked = (source: string) => body(source).flatMap(b => b.segments ?? []).filter(s => s.color || s.bold || s.highlight || s.underline);
 
 describe("local layout regressions", () => {
   test("does not invent a title from a long or multi-sentence opening", () => {
@@ -69,24 +69,23 @@ describe("local layout regressions", () => {
     const blocks = createBlocksFromText(source);
     expect(layoutPreservesSource(blocks, source)).toBe(true);
     expect(blocks).toEqual(createBlocksFromText(source));
-    let sectionCount = 0, totalCount = 0, markedChars = 0, bodyChars = 0;
+    let totalCount = 0, markedChars = 0, bodyChars = 0;
     for (const block of blocks) {
-      if (block.type === "hr") { expect(sectionCount).toBeLessThanOrEqual(2); sectionCount = 0; }
       if (block.type !== "p") continue;
       bodyChars += Array.from(block.text.replace(/\s/g, "")).length;
-      const marks = block.segments?.filter(s => s.color || s.bold) ?? [];
+      const marks = block.segments?.filter(s => s.color || s.bold || s.highlight || s.underline) ?? [];
       expect(marks.length).toBeLessThanOrEqual(1);
       expect(block.highlight || block.underline).toBe(false);
       for (const mark of marks) {
         expect(mark.bold).toBeUndefined();
         markedChars += Array.from(mark.text.replace(/\s/g, "")).length;
-        totalCount += 1; sectionCount += 1;
+        totalCount += 1;
+        expect([mark.color, mark.highlight, mark.underline].filter(Boolean)).toHaveLength(1);
       }
     }
-    expect(sectionCount).toBeLessThanOrEqual(2);
     expect(totalCount).toBeGreaterThan(0);
-    expect(totalCount).toBeLessThanOrEqual(6);
-    expect(markedChars).toBeLessThanOrEqual(Math.floor(bodyChars * 0.2));
+    expect(totalCount).toBeLessThanOrEqual(Math.ceil(bodyChars / 240) * 3);
+    expect(markedChars).toBeLessThanOrEqual(Math.floor(bodyChars * 0.3));
   });
   test("falls back to original lines with a notice if text or styled segments change", () => {
     const source = "# 标题\n\n- 项目\n\n原文，保留标点。";
@@ -105,4 +104,41 @@ describe("local layout regressions", () => {
 test("promotes explicit action openings but not ordinary narrated sequences", () => {
   const blocks = createBlocksFromText("准备安排\n\n先从自己这里划边界。后面逐项解释如何确定资格与方向。\n\n接着把学校放进待了解区。这里继续解释下一步的操作。\n\n最后，我回到家里。窗外的树叶缓缓落下。");
   expect(blocks.filter(b => b.type === "h3").map(b => b.text)).toEqual(["先从自己这里划边界。", "接着把学校放进待了解区。"]);
+});
+
+test("finds method changes and viewpoint headings without changing their wording", () => {
+  const headings = ["挑一个最影响课堂的五分钟。", "逐字稿也不必立刻扔掉。", "真正进入重点范围的学校，不需要很多。", "普通学校也可以放进重点范围。", "名单建立以后，每次投递都留下原因和状态。"];
+  const source = "# 标题\n\n" + headings.map(h => h + "这里继续解释具体操作，以及这样安排的原因和后续步骤。").join("\n\n");
+  const blocks = createBlocksFromText(source);
+  expect(blocks.filter(b => b.type === "h3").map(b => b.text)).toEqual(headings);
+  expect(blocks.filter(b => b.type === "hr").length).toBeLessThan(headings.length);
+  expect(layoutPreservesSource(blocks, source)).toBe(true);
+});
+
+test("keeps a heading candidate as body when the following sentence would also be a heading", () => {
+  const source = "# 标题\n\n挑一个最重要的练习。\n\n先从自己的问题开始。后面解释具体的方法。";
+  expect(createBlocksFromText(source).find(b => b.text === "挑一个最重要的练习。")?.type).toBe("p");
+});
+
+test("uses more than six marks on a long article and retains a thirty-percent character budget", () => {
+  const source = "# 标题\n\n" + Array.from({length: 8}, (_, i) => `## 第${i+1}部分\n\n这里交代一段完整背景，让后面的判断具备充分依据。窗外的天气依然晴朗，讨论还在继续。\n\n关键在于先明确目标。\n\n不要把所有时间花在纠结上。\n\n这里还会补充具体情境，帮助读者理解问题，并把这一部分的来龙去脉解释清楚。`).join("\n\n");
+  const blocks = body(source), marks = marked(source);
+  expect(marks.length).toBeGreaterThan(6);
+  expect(marks.some(s => s.highlight)).toBe(true);
+  expect(marks.some(s => s.underline)).toBe(true);
+  expect(marks.reduce((n,s)=>n+s.text.replace(/\s/g, "").length,0)).toBeLessThanOrEqual(blocks.reduce((n,b)=>n+b.text.replace(/\s/g, "").length,0)*0.3);
+});
+
+import { blocksToMarkdown, normalizeTextSegments, applyRuleBasedEmphasis, makeBlock } from "./articleStructure.js";
+test("retains exact inline mark boundaries in normalization and Markdown", () => {
+  const segments = [{text:"普通文字。"}, {text:"黄色高亮。",highlight:true}, {text:"继续普通文字。"}, {text:"红色划线。",underline:true}];
+  const block = makeBlock("p", "", false, false, segments);
+  expect(normalizeTextSegments(segments)).toHaveLength(4);
+  const markdown = blocksToMarkdown([block]);
+  expect(markdown).toContain("普通文字。<mark>黄色高亮。</mark>继续普通文字。");
+  expect(markdown).toContain('红色划线。</span>');
+  expect(applyRuleBasedEmphasis([block])).toEqual([block]);
+  const manual = { ...block, highlight: true };
+  expect(blocksToMarkdown([manual]).match(/<mark>/g)).toHaveLength(1);
+  expect(blocksToMarkdown([manual])).not.toContain("wavy");
 });

@@ -13,12 +13,11 @@ describe("paginateBlocks", () => {
       .map((block, index) => ({ ...block, id: String(index) }));
     const heights = new Map(blocks.map((block) => [block.id, block.type === "hr" ? 29 : 20 + Math.ceil(block.text.length / 22) * 25]));
     const pages = paginateBlocks(blocks, heights, style);
-    expect(pages.flatMap((page) => page.blocks).map((block) => block.id)).toEqual(blocks.map((block) => block.id));
+    expect(pages.flatMap((page) => page.blocks).filter(b => b.type !== "hr").map((block) => block.id)).toEqual(blocks.filter(b => b.type !== "hr").map((block) => block.id));
     for (const page of pages) {
       expect(["hr", "h3"]).not.toContain(page.blocks[page.blocks.length - 1]?.type);
       page.blocks.forEach((block, index) => {
         if (block.type === "h3" && block !== blocks[0]) {
-          expect(page.blocks[index - 1]?.type).toBe("hr");
           expect(page.blocks[index + 1]?.type).toBe("p");
         }
       });
@@ -111,5 +110,24 @@ describe("oversized page fragments", () => {
     expect(fitted.map(b => b.text).join("")).toBe(text);
     expect(fitted.every(b => !/^[\u200D\p{Mark}]/u.test(b.text) && !b.text.endsWith("\u200D"))).toBe(true);
     expect(fitted.map(b => (b.text.match(/👨‍👩‍👧‍👦/g) ?? []).length).reduce((a,b) => a+b, 0)).toBe(15);
+  });
+});
+
+describe("content-aware section placement", () => {
+  const style = { ...resolveCardStyle({ themeId: "apple-notes", fontFamilyId: "system", baseFontSize: 16.5 }), contentHeight: 300 };
+  test("keeps a mid-page divider, heading and two body lines instead of moving the whole section", () => {
+    const blocks = [makeBlock("intro", "p", "前文"), {...makeBlock("line", "hr"), dividerSource:"auto" as const}, makeBlock("heading", "h3", "下一部分"), makeBlock("body", "p", "前两行后两行")];
+    const heights = new Map([["intro",150],["line",10],["heading",30],["body",190]]);
+    const pages = paginateBlocks(blocks, heights, style, (block, room) => {
+      if (room < 90) return null;
+      return {head:{...block,id:"head",text:"前两行"},tail:{...block,id:"tail",text:"后两行"},headHeight:90,tailHeight:100};
+    });
+    expect(pages.map(p=>p.blocks.map(b=>b.id))).toEqual([["intro","line","heading","head"],["tail"]]);
+    expect(pages.flatMap(p=>p.blocks).filter(b=>b.type!=="hr").map(b=>b.text).join("")).toBe("前文下一部分前两行后两行");
+  });
+  test.each(["auto","manual"] as const)("handles %s dividers at a new page top", dividerSource => {
+    const blocks = [makeBlock("intro","p","前文"),{...makeBlock("line","hr"),dividerSource},makeBlock("heading","h3","标题"),makeBlock("body","p","后文")];
+    const pages=paginateBlocks(blocks,new Map([["intro",280],["line",10],["heading",30],["body",50]]),style);
+    expect(pages[1].blocks.map(b=>b.id)).toEqual(dividerSource==="auto"?["heading","body"]:["line","heading","body"]);
   });
 });

@@ -100,7 +100,7 @@ export function App() {
     const frame = requestAnimationFrame(() => {
       try {
         const fitted = prepareBlocksForPng(blocks, cardStyle);
-        setPages(paginateBlocks(fitted.blocks, fitted.heights, cardStyle));
+        setPages(paginateBlocks(fitted.blocks, fitted.heights, cardStyle, fitted.splitParagraph));
       } catch {
         setPreviewError("预览生成失败，请减小字号或刷新预览。");
         setIsPreviewRendering(false);
@@ -144,8 +144,8 @@ export function App() {
     updateBlock(
       selectedBlock.id,
       flag === "highlight"
-        ? { highlight: !selectedBlock.highlight }
-        : { underline: !selectedBlock.underline },
+        ? { highlight: !selectedBlock.highlight, underline: false, segments: undefined }
+        : { underline: !selectedBlock.underline, highlight: false, segments: undefined },
     );
   }
 

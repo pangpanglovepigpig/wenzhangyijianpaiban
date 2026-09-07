@@ -537,10 +537,10 @@ export function resolveCardStyle(settings: CardStyleSettings): ResolvedCardStyle
       color: theme.dividerColor,
     },
     highlight: {
-      color: theme.highlightColor,
+      color: "rgba(255, 226, 85, 0.62)",
     },
     underline: {
-      color: theme.underlineColor,
+      color: "#d93025",
       thickness: theme.id === "apple-notes" ? 1.2 : 1.35,
       offset: 4,
     },

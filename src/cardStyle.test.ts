@@ -209,3 +209,11 @@ function installFakeCanvas(assignedFonts: string[] = []) {
     createElement: () => ({ getContext: () => context }),
   });
 }
+
+test("keeps the requested yellow marker and red underline across all themes", () => {
+  for (const theme of THEME_OPTIONS) {
+    const style=resolveCardStyle({themeId:theme.id,fontFamilyId:"system",baseFontSize:16.5});
+    expect(style.highlight.color).toBe("rgba(255, 226, 85, 0.62)");
+    expect(style.underline.color).toBe("#d93025");
+  }
+});

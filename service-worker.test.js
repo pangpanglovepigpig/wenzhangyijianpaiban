@@ -3,7 +3,7 @@ import vm from "node:vm";
 import { describe, expect, test, vi } from "vitest";
 
 const APP_SCOPE = "https://example.com/wenzhangyijianpaiban/";
-const CURRENT_CACHE = "xiaohongshu-article-notes-v13";
+const CURRENT_CACHE = "xiaohongshu-article-notes-v14";
 const CURRENT_SCRIPT = `${APP_SCOPE}assets/app-current.js`;
 const CURRENT_STYLES = `${APP_SCOPE}assets/app-current.css`;
 const serviceWorkerSource = readFileSync(new URL("./public/service-worker.js", import.meta.url), "utf8");

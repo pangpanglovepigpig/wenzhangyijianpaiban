@@ -31,5 +31,5 @@ export function makeBlock(
 }
 
 export function withBlockId(block: Omit<ContentBlock, "id">): ContentBlock {
-  return makeBlock(block.type, block.text, block.highlight, block.underline, block.segments);
+  return { ...block, ...makeBlock(block.type, block.text, block.highlight, block.underline, block.segments) };
 }

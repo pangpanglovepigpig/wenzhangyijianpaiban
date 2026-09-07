@@ -60,7 +60,7 @@ function buildLocalBlocks(input) {
     const numberedMatters = getOrderedNumberedMatterHeadingLines(lines);
     lines.forEach((line, index) => {
         if (markdownDividerPattern.test(line.text)) {
-            addDividerIfNeeded(blocks);
+            addDividerIfNeeded(blocks, "manual");
             sectionTexts = [];
             return;
         }
@@ -68,7 +68,7 @@ function buildLocalBlocks(input) {
         const type = markdown ? `h${markdown.level}` : index === 0 && isTitleLike(line, lines[index + 1])
             ? "h1" : isSubheadingLike(line, lines[index + 1]) ? "h2" : null;
         if (type) {
-            addDividerIfNeeded(blocks);
+            if (type !== "h3") addDividerIfNeeded(blocks);
             blocks.push(makeBlock(type, markdown?.text ?? line.text));
             sectionTexts = [];
             return;
@@ -80,8 +80,12 @@ function buildLocalBlocks(input) {
             return;
         }
         const structural = splitLeadingStructuralHeading(line.text, numberedMatters.has(line.text));
-        if (structural && (structural.remainder || isFollowingBody(lines[index + 1]))) {
-            addDividerIfNeeded(blocks);
+        const following = lines[index + 1];
+        const hasBody = structural?.remainder || (isFollowingBody(following) &&
+            !splitLeadingStructuralHeading(following.text, numberedMatters.has(following.text)));
+        if (structural && hasBody) {
+            const sectionLength = lengthOf(sectionTexts.join(""));
+            if (sectionLength >= 180 && /^(所以|因此|总之|反过来|接下来|最后)/.test(structural.heading)) addDividerIfNeeded(blocks);
             blocks.push(makeBlock("h3", structural.heading));
             sectionTexts = [];
             if (structural.remainder) {
@@ -220,8 +224,12 @@ function splitLeadingStructuralHeading(text, allowNumberedMatter) {
     if (!first?.complete) return null;
     const heading = text.slice(0, first.end).trim();
     const numbered = allowNumberedMatter && numberedMatterOpeningPattern.test(heading);
-    if (lengthOf(heading) < 6 || lengthOf(heading) > (numbered ? 40 : 34) ||
-        /[？?]/.test(heading) || (!numbered && !structuralHeadingOpeningPattern.test(heading))) return null;
+    const method = /^(挑|选|找|留)(?:一|出)|^这时(?:可以|要|先)|^.{2,12}(?:也不必|不必立刻|可以先|需要先)/.test(heading);
+    const scope = /^普通.{2,12}也可以.{2,16}范围/.test(heading) || /^(真正|普通).{2,20}(?:范围|学校|目标).{0,12}(?:不需要|也可以|不必)/.test(heading);
+    const stage = /^.{2,12}(?:建立|完成|整理)(?:以后|之后)[，,]/.test(heading);
+    const conclusion = /^(所以|因此|总之)[，,]?(?:不要|别|不必)|^.{2,12}不是.{1,12}越.{1,12}越/.test(heading);
+    if (lengthOf(heading) < 8 || lengthOf(heading) > 40 ||
+        /[？?]/.test(heading) || (!numbered && !method && !scope && !stage && !conclusion && !structuralHeadingOpeningPattern.test(heading))) return null;
     if (/^(首先|其次|再次|最后[，,：:])/.test(heading) &&
         !/(要|需要|把|核对|检查|准备|确认|选择|决定|明确|目标|判断|整理|完成)/.test(heading)) return null;
     return { heading, remainder: text.slice(first.end).trim() };
@@ -229,23 +237,25 @@ function splitLeadingStructuralHeading(text, allowNumberedMatter) {
 function splitIntoInfoBlocks(text) {
     const units = sentenceRanges(text).flatMap((range) => {
         const sentence = text.slice(range.start, range.end);
-        return lengthOf(sentence) > 100 ? boundaryRanges(sentence, true).map((part) => ({
+        return lengthOf(sentence) > 80 ? boundaryRanges(sentence, true).map((part) => ({
             start: range.start + part.start, end: range.start + part.end,
         })) : [range];
     });
     const blocks = [];
-    let current = null;
+    let current = null, count = 0;
     for (const unit of units) {
-        if (!current) { current = { ...unit }; continue; }
+        if (!current) { current = { ...unit }; count = 1; continue; }
         const currentLength = lengthOf(text.slice(current.start, current.end));
         const combinedLength = lengthOf(text.slice(current.start, unit.end));
-        if (combinedLength <= 100 || (currentLength < 50 && combinedLength <= 120)) current.end = unit.end;
-        else { blocks.push(current); current = { ...unit }; }
+        const standalone = currentLength >= 12 && emphasisScore(text.slice(current.start, current.end))?.score >= 9;
+        if (!standalone && count < 2 && (combinedLength <= 65 || (currentLength < 20 && combinedLength <= 80))) {
+            current.end = unit.end; count += 1;
+        } else { blocks.push(current); current = { ...unit }; count = 1; }
     }
     if (current) blocks.push(current);
     if (blocks.length > 1) {
         const last = blocks[blocks.length - 1], previous = blocks[blocks.length - 2];
-        if (lengthOf(text.slice(last.start, last.end)) <= 10 && lengthOf(text.slice(previous.start, last.end)) <= 120) {
+        if (lengthOf(text.slice(last.start, last.end)) <= 10 && lengthOf(text.slice(previous.start, last.end)) <= 80) {
             previous.end = last.end;
             blocks.pop();
         }
@@ -256,56 +266,74 @@ function splitIntoInfoBlocks(text) {
 function emphasisScore(text) {
     const clean = text.replace(/能不能|要不要|需不需要/g, "");
     if (/[？?]/.test(clean)) return null;
-    const risk = /(?:^|[，,：:])(不要|不能|不应|避免|必须|务必|千万别|注意|警惕|别把)|一定要|不等于|不代表/.test(clean);
-    const action = /建议|具体做法|方法是|先把|先做|先查|先确认|先判断|再决定|再检查|核对|检查|确认/.test(clean);
-    const conclusion = /关键(?:是|在于)|核心(?:是|在于)|结论是|值得.{0,18}但不适合|不是.{1,24}而是|真正要调整/.test(clean);
-    if (risk) return { score: 8 + (action ? 1 : 0), color: "red" };
-    if (conclusion) return { score: 9, color: "blue" };
-    if (action && /建议|具体|先|再|需要|要/.test(clean)) return { score: 7, color: "blue" };
+    const risk = /(?:^|[，,：:])(?:不要|不能|不应|避免|必须|务必|千万别|注意(?!力)|警惕|别把)|一定要|不等于|不代表|误认为|不该|否则|超出承受|容易把|最没用/.test(clean);
+    const contrast = /不是.{1,30}而是|不是.{1,30}只是|不在.{1,20}而在|不只是|不总是|并不总是|不必.{1,20}但/.test(clean);
+    const conclusion = /关键(?:是|在于)|核心(?:是|在于)|结论是|至少要(?:建立|明确|确定)|值得.{0,18}但不适合|真正要调整|才是(?:结构|关键|核心|目标|解决)|才看得见|才看得清|就比|会比|说明|意味着|只要.{2,24}就|不是同一件事|逐字稿.{0,6}压缩|每一步.{0,10}判断/.test(clean);
+    const action = /(?:^|[，,：:])(?:把|先|再|用|让|问得|一次只|每次)|建议|具体做法|方法是|核对|检查|确认|主问题|问题链|提前整理/.test(clean);
+    if (contrast || conclusion) return { score: 10, style: "highlight" };
+    if (risk) return { score: 9, style: "underline" };
+    if (action && /建议|具体|先|再|需要|要|把|每次|一次/.test(clean)) return { score: 7, style: "color" };
     return null;
 }
 export function applyRuleBasedEmphasis(blocks) {
-    const result = blocks.map((block) => ({ ...block, segments: undefined, highlight: false, underline: false }));
+    // Preserve explicit manual styles if this helper is reapplied to edited blocks.
+    const result = blocks.map((block) => ({ ...block }));
     const candidates = [];
-    let section = 0;
+    let offset = 0;
     for (let index = 0; index < result.length; index += 1) {
         const block = result[index];
-        if (block.type === "hr") { section += 1; continue; }
         if (block.type !== "p") continue;
+        const startOffset = offset;
+        offset += lengthOf(block.text);
+        if (block.highlight || block.underline || block.segments?.some(s => s.color || s.bold || s.highlight || s.underline)) continue;
         const ranges = sentenceRanges(block.text).flatMap((range) => {
             const sentence = block.text.slice(range.start, range.end);
-            if (lengthOf(sentence) <= 60) return [range];
+            if (lengthOf(sentence) <= 80) return [range];
             return boundaryRanges(sentence, true).map((part) => ({ start: range.start + part.start, end: range.start + part.end }));
         });
         for (const range of ranges) {
             const text = block.text.slice(range.start, range.end);
             const length = lengthOf(text);
             const score = emphasisScore(text.trim());
-            if (length >= 8 && length <= 60 && score) candidates.push({ ...range, ...score, length, index, section });
+            if (length >= 8 && length <= 80 && !/[、：:]$|的[，,]?$/.test(text.trim()) && score) candidates.push({ ...range, ...score, length, index,
+                zone: Math.floor((startOffset + lengthOf(block.text.slice(0, range.start))) / 240) });
         }
     }
-    const budget = Math.floor(result.filter((block) => block.type === "p").reduce((sum, block) => sum + lengthOf(block.text), 0) * 0.2);
-    const perSection = new Map(), selected = new Set();
+    const budget = Math.floor(offset * 0.3);
+    const chosen = new Set();
     let used = 0;
+    const zones = new Map();
     candidates.sort((a, b) => b.score - a.score || a.index - b.index || a.start - b.start);
     for (const candidate of candidates) {
-        if (selected.size >= 6) break;
-        if (selected.has(candidate.index) || (perSection.get(candidate.section) ?? 0) >= 2 || used + candidate.length > budget) continue;
-        const block = result[candidate.index];
-        // One treatment only: inline color, without bold/mark/underline stacking.
-        block.segments = normalizeTextSegments([
-            { text: block.text.slice(0, candidate.start) },
-            { text: block.text.slice(candidate.start, candidate.end), color: candidate.color },
-            { text: block.text.slice(candidate.end) },
-        ]);
-        selected.add(candidate.index);
-        used += candidate.length;
-        perSection.set(candidate.section, (perSection.get(candidate.section) ?? 0) + 1);
+        if (!zones.has(candidate.zone)) zones.set(candidate.zone, []);
+        zones.get(candidate.zone).push(candidate);
+    }
+    const colors = new Set();
+    // Round-robin by reading position, so the beginning cannot spend the whole budget.
+    for (let round = 0; round < 3; round += 1) {
+        for (const zone of [...zones.keys()].sort((a, b) => a - b)) {
+            const candidate = zones.get(zone).find(c => !chosen.has(c.index) && used + c.length <= budget &&
+                (c.style !== "color" || !colors.has(zone)));
+            if (!candidate) continue;
+            const block = result[candidate.index];
+            const style = candidate.style === "color" ? { color: "blue" } : { [candidate.style]: true };
+            block.segments = normalizeTextSegments([
+                { text: block.text.slice(0, candidate.start) },
+                { text: block.text.slice(candidate.start, candidate.end), ...style },
+                { text: block.text.slice(candidate.end) },
+            ]);
+            chosen.add(candidate.index);
+            used += candidate.length;
+            if (candidate.style === "color") colors.add(zone);
+        }
     }
     return result;
 }
-function addDividerIfNeeded(blocks) {
-    if (blocks.length && blocks[blocks.length - 1].type !== "hr") blocks.push(makeBlock("hr"));
+function addDividerIfNeeded(blocks, dividerSource = "auto") {
+    const previous = blocks[blocks.length - 1];
+    if (previous?.type === "hr") {
+        if (dividerSource === "manual") previous.dividerSource = "manual";
+    } else if (previous) blocks.push({ ...makeBlock("hr"), dividerSource });
 }
 function compactDividers(blocks) {
     const result = [];
@@ -400,7 +428,9 @@ export function normalizeTextSegments(segments) {
         .map((segment) => ({
         text: segment.text,
         bold: segment.bold || undefined,
-        color: segment.color === "red" || segment.color === "blue" ? segment.color : undefined,
+        color: !segment.highlight && !segment.underline && (segment.color === "red" || segment.color === "blue") ? segment.color : undefined,
+        highlight: segment.highlight || undefined,
+        underline: !segment.highlight && segment.underline || undefined,
     }))
         .filter((segment) => segment.text.length > 0);
     if (!normalized.length)
@@ -418,12 +448,15 @@ function renderInlineMarkdown(block) {
     const segments = normalizeTextSegments(block.segments);
     if (!segments)
         return escapeInlineMarkdown(block.text);
-    return segments.map(renderSegmentMarkdown).join("");
+    return segments.map(segment => renderSegmentMarkdown(block.highlight || block.underline
+        ? { text: segment.text } : segment)).join("");
 }
 function renderSegmentMarkdown(segment) {
     let text = escapeInlineMarkdown(segment.text);
     if (segment.bold)
         text = `**${text}**`;
+    if (segment.highlight) text = `<mark>${text}</mark>`;
+    if (segment.underline) text = `<span style="${redUnderlineStyle}">${text}</span>`;
     if (segment.color)
         text = `<span style="${inlineColorStyles[segment.color]}">${text}</span>`;
     return text;
@@ -431,7 +464,7 @@ function renderSegmentMarkdown(segment) {
 function mergeAdjacentSegments(segments) {
     return segments.reduce((result, segment) => {
         const previous = result[result.length - 1];
-        if (previous && previous.bold === segment.bold && previous.color === segment.color) {
+        if (previous && previous.bold === segment.bold && previous.color === segment.color && previous.highlight === segment.highlight && previous.underline === segment.underline) {
             previous.text += segment.text;
             return result;
         }

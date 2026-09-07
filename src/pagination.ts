@@ -49,7 +49,7 @@ export function fitBlocksForPages(
   });
 }
 
-function sliceBlock(block: ContentBlock, start: number, end: number): ContentBlock {
+export function sliceBlock(block: ContentBlock, start: number, end: number): ContentBlock {
   let offset = 0;
   const segments = block.segments?.flatMap(segment => {
     const from = Math.max(0, start - offset), to = Math.min(segment.text.length, end - offset);
@@ -60,58 +60,57 @@ function sliceBlock(block: ContentBlock, start: number, end: number): ContentBlo
 }
 
 
+export type ParagraphSplit = { head: ContentBlock; tail: ContentBlock; headHeight: number; tailHeight: number };
+export type SplitParagraph = (block: ContentBlock, availableHeight: number) => ParagraphSplit | null;
+
 export function paginateBlocks(
   blocks: ContentBlock[],
   measuredHeights: Map<string, number>,
   cardStyle: ResolvedCardStyle,
+  splitParagraph?: SplitParagraph,
 ): PageModel[] {
   const pages: PageModel[] = [];
+  const queue = [...blocks];
+  const heights = new Map(measuredHeights);
   let current: ContentBlock[] = [];
-  let used = 0;
-  let index = 0;
-
+  let used = 0, index = 0;
+  const heightOf = (block: ContentBlock) => heights.get(block.id) ?? fallbackHeight(block);
   const flushPage = () => {
     const pageBlocks = trimTrailingDivider(current);
     if (pageBlocks.length) pages.push({ id: createId(), blocks: pageBlocks });
-    current = [];
-    used = 0;
+    current = []; used = 0;
   };
 
-  while (index < blocks.length) {
-    const unit = getKeepTogetherUnit(blocks, index, measuredHeights, cardStyle.contentHeight);
-    const unitHeight = unit.reduce(
-      (total, block) => total + (measuredHeights.get(block.id) ?? fallbackHeight(block)),
-      0,
-    );
-
-    if (unit.length > 1) {
-      if (current.length && used + unitHeight > cardStyle.contentHeight) flushPage();
-      current.push(...unit);
-      used += unitHeight;
-      index += unit.length;
+  while (index < queue.length) {
+    if (!current.length && queue[index].type === "hr" && queue[index].dividerSource === "auto") {
+      index += 1;
       continue;
     }
-
-    const block = unit[0];
-    const height = unitHeight;
-    if (current.length && used + height > cardStyle.contentHeight) {
-      const trailingDivider = current[current.length - 1]?.type === "hr" ? current.pop() ?? null : null;
-      flushPage();
-      if (trailingDivider) {
-        current.push(trailingDivider);
-        used += measuredHeights.get(trailingDivider.id) ?? fallbackHeight(trailingDivider);
+    const unit = getKeepTogetherUnit(queue, index, heights, cardStyle.contentHeight);
+    const unitHeight = unit.reduce((sum, block) => sum + heightOf(block), 0);
+    if (current.length && used + unitHeight > cardStyle.contentHeight) {
+      const last = unit[unit.length - 1];
+      const prefix = unit.slice(0, -1);
+      const room = cardStyle.contentHeight - used - prefix.reduce((sum, block) => sum + heightOf(block), 0);
+      const split = last.type === "p" ? splitParagraph?.(last, room) : null;
+      if (split) {
+        const position = index + unit.length - 1;
+        queue.splice(position, 1, split.head, split.tail);
+        heights.set(split.head.id, split.headHeight);
+        heights.set(split.tail.id, split.tailHeight);
+        current.push(...prefix, split.head);
+        index = position + 1;
+        flushPage();
+        continue;
       }
+      flushPage();
+      continue;
     }
-
-    current.push(block);
-    used += height;
-    index += 1;
+    current.push(...unit);
+    used += unitHeight;
+    index += unit.length;
   }
-
-  if (current.length > 0) {
-    flushPage();
-  }
-
+  if (current.length) flushPage();
   return pages.length ? pages : [{ id: createId(), blocks: [] }];
 }
 
@@ -152,7 +151,7 @@ function getKeepTogetherUnit(
 
 function trimTrailingDivider(blocks: ContentBlock[]) {
   let next = [...blocks];
-  while (next[next.length - 1]?.type === "hr") {
+  while (next[next.length - 1]?.type === "hr" && next[next.length - 1]?.dividerSource === "auto") {
     next = next.slice(0, -1);
   }
   return next;
