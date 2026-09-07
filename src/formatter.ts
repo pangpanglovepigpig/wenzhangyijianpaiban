@@ -3,7 +3,7 @@ import { CARD_HEIGHT, CARD_WIDTH } from "./cardStyle";
 import { createId } from "./uuid";
 import {
   createBlocksFromText as createArticleBlocks,
-  stabilizeAiDraftBlocks as stabilizeArticleBlocks,
+  formatArticle as formatLocalArticle,
   makeBlock as makeArticleBlock,
 } from "../shared/articleStructure.js";
 
@@ -16,11 +16,12 @@ export const IMAGE_CONFIG: RenderConfig = {
 };
 
 export function createBlocksFromText(input: string): ContentBlock[] {
-  return createArticleBlocks(input).map(makeBlockFromDraft);
+  return createArticleBlocks(input).map(withBlockId);
 }
 
-export function stabilizeAiDraftBlocks(blocks: ContentBlock[], sourceText: string): ContentBlock[] {
-  return stabilizeArticleBlocks(blocks, sourceText).map(makeBlockFromDraft);
+export function formatArticle(input: string): { blocks: ContentBlock[]; notice?: string } {
+  const result = formatLocalArticle(input);
+  return { ...result, blocks: result.blocks.map(withBlockId) };
 }
 
 export function makeBlock(
@@ -29,6 +30,6 @@ export function makeBlock(
   return { ...makeArticleBlock(type, text, highlight, underline, segments), id: createId() };
 }
 
-export function makeBlockFromDraft(block: Omit<ContentBlock, "id">): ContentBlock {
+export function withBlockId(block: Omit<ContentBlock, "id">): ContentBlock {
   return makeBlock(block.type, block.text, block.highlight, block.underline, block.segments);
 }

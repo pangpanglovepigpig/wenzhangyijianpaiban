@@ -14,12 +14,10 @@ import {
   Trash2,
   Underline,
 } from "lucide-react";
-import { exportPagesToPng, measureBlocksForPng, type ExportedImage } from "./exportImage";
+import { exportPagesToPng, prepareBlocksForPng, type ExportedImage } from "./exportImage";
 import { downloadImage, downloadImagesSequentially, type DownloadProgress } from "./downloadImages";
-import { blocksToMarkdown, createBlocksFromText, IMAGE_CONFIG, makeBlock, sampleArticle } from "./formatter";
+import { blocksToMarkdown, createBlocksFromText, formatArticle, IMAGE_CONFIG, makeBlock, sampleArticle } from "./formatter";
 import { paginateBlocks } from "./pagination";
-import { DraftRequest } from "./draftRequest";
-import { generateDraftWithDeepSeek } from "./draftApi";
 import {
   DEFAULT_CARD_STYLE,
   FONT_OPTIONS,
@@ -29,8 +27,6 @@ import {
 } from "./cardStyle";
 import type { CardStyleSettings, ContentBlock, FontFamilyId, PageModel } from "./types";
 
-const ENABLE_AI_DRAFT = import.meta.env.VITE_ENABLE_AI_DRAFT === "true";
-
 export function App() {
   const [sourceText, setSourceText] = useState(sampleArticle);
   const [blocks, setBlocks] = useState<ContentBlock[]>(() => createBlocksFromText(sampleArticle));
@@ -39,15 +35,12 @@ export function App() {
   const [images, setImages] = useState<ExportedImage[]>([]);
   const [isPreviewRendering, setIsPreviewRendering] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [draftError, setDraftError] = useState<string | null>(null);
-  const [draftNotice, setDraftNotice] = useState<string | null>(null);
-  const [isDraftGenerating, setIsDraftGenerating] = useState(false);
+  const [layoutNotice, setLayoutNotice] = useState<string | null>(null);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
   const [styleSettings, setStyleSettings] = useState<CardStyleSettings>(DEFAULT_CARD_STYLE);
   const previewRequestRef = useRef(0);
-  const draftRequestRef = useRef(new DraftRequest());
 
   const markdown = useMemo(() => blocksToMarkdown(blocks), [blocks]);
   const cardStyle = useMemo(() => resolveCardStyle(styleSettings), [styleSettings]);
@@ -63,10 +56,6 @@ export function App() {
       revokeImages(images);
     };
   }, [images]);
-
-  useEffect(() => {
-    return () => draftRequestRef.current.cancel(false);
-  }, []);
 
   useEffect(() => {
     if (!pages.length) {
@@ -109,45 +98,28 @@ export function App() {
 
   useLayoutEffect(() => {
     const frame = requestAnimationFrame(() => {
-      const nextHeights = measureBlocksForPng(blocks, cardStyle);
-      setPages(paginateBlocks(blocks, nextHeights, cardStyle));
+      try {
+        const fitted = prepareBlocksForPng(blocks, cardStyle);
+        setPages(paginateBlocks(fitted.blocks, fitted.heights, cardStyle));
+      } catch {
+        setPreviewError("预览生成失败，请减小字号或刷新预览。");
+        setIsPreviewRendering(false);
+      }
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [blocks, cardStyle]);
+  }, [blocks, cardStyle, previewRefreshNonce]);
 
   function formatSourceText() {
-    cancelDraftRequest();
-    const nextBlocks = createBlocksFromText(sourceText);
-    setBlocks(nextBlocks);
-    setSelectedId(nextBlocks[0]?.id ?? null);
-    setDraftError(null);
-    setDraftNotice(null);
+    if (!sourceText.trim()) return;
+    const result = formatArticle(sourceText);
+    setBlocks(result.blocks);
+    setSelectedId(result.blocks[0]?.id ?? null);
+    setLayoutNotice(result.notice ?? null);
     clearImages();
   }
 
-  async function generateDraft() {
-    if (!ENABLE_AI_DRAFT || draftRequestRef.current.pending || !sourceText.trim()) return;
-
-    const requestedText = sourceText;
-    setDraftError(null);
-    setDraftNotice(null);
-
-    await draftRequestRef.current.run(
-      (signal) => generateDraftWithDeepSeek(requestedText, signal),
-      (result) => {
-        setBlocks(result.blocks);
-        setSelectedId(result.blocks[0]?.id ?? null);
-        setDraftNotice(result.notice ?? null);
-        clearImages();
-      },
-      (error) => setDraftError(error instanceof Error ? error.message : "AI 排版失败，请稍后再试。"),
-      setIsDraftGenerating,
-    );
-  }
-
   function updateBlock(id: string, patch: Partial<ContentBlock>) {
-    cancelDraftRequest();
     setBlocks((current) =>
       current.map((block) => {
         if (block.id !== id) return block;
@@ -178,7 +150,6 @@ export function App() {
   }
 
   function insertDividerAfter(id: string) {
-    cancelDraftRequest();
     const divider = makeBlock("hr");
     setBlocks((current) => {
       const index = current.findIndex((block) => block.id === id);
@@ -190,7 +161,6 @@ export function App() {
   }
 
   function insertTextBlockAfter(id: string) {
-    cancelDraftRequest();
     const textBlock = makeBlock("p", "新的内容段落");
     setBlocks((current) => {
       const index = current.findIndex((block) => block.id === id);
@@ -202,7 +172,6 @@ export function App() {
   }
 
   function removeBlock(id: string) {
-    cancelDraftRequest();
     setBlocks((current) => current.filter((block) => block.id !== id));
     if (selectedId === id) setSelectedId(null);
     clearImages();
@@ -221,10 +190,6 @@ export function App() {
     previewRequestRef.current += 1;
     setPreviewError(null);
     setImages([]);
-  }
-
-  function cancelDraftRequest() {
-    draftRequestRef.current.cancel();
   }
 
   async function saveAllImages() {
@@ -257,35 +222,28 @@ export function App() {
               <h1>小红书图文排版</h1>
             </div>
             <div className="input-actions">
-              <button className="primary-button" onClick={ENABLE_AI_DRAFT ? generateDraft : formatSourceText}
-                disabled={isDraftGenerating || !sourceText.trim()}>
+              <button className="primary-button" onClick={formatSourceText}
+                disabled={!sourceText.trim()}>
                 <Rows3 size={18} />
-                {isDraftGenerating ? "AI 排版中…" : "排版文章"}
+                排版文章
               </button>
             </div>
           </div>
 
-          <div className="draft-notice" role="status">
-            {ENABLE_AI_DRAFT
-              ? (isDraftGenerating ? "正在判断分区、三级标题和重点，完成后一次性更新；最多等待一分钟，超时将提示失败。" : "AI 排版：自动判断分区、三级标题和重点。")
-              : <>本地排版，无 AI。<a href="https://wenzhangyijianpaiban.vercel.app/" target="_blank" rel="noreferrer">前往正式站使用 AI 排版</a></>}
+          <div className="layout-notice" role="status">
+            本地自动排版，文章无需上传
           </div>
           <textarea
             className="source-input"
             value={sourceText}
             onChange={(event) => {
-              cancelDraftRequest();
               setSourceText(event.target.value);
-              if (ENABLE_AI_DRAFT) {
-                setDraftError(null);
-                setDraftNotice(null);
-              }
+              setLayoutNotice(null);
             }}
             aria-label="文章正文"
           />
 
-          {ENABLE_AI_DRAFT && draftNotice && <div className="draft-notice">{draftNotice}</div>}
-          {ENABLE_AI_DRAFT && draftError && <div className="draft-error">{draftError}</div>}
+          {layoutNotice && <div className="layout-notice" role="status">{layoutNotice}</div>}
 
           <StyleSettingsPanel settings={styleSettings} cardStyle={cardStyle} onChange={updateStyleSettings} />
 

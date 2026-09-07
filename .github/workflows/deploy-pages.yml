@@ -36,8 +36,6 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_ENABLE_AI_DRAFT: "true"
-          VITE_AI_DRAFT_ENDPOINT: https://wenzhangyijianpaiban.vercel.app/api/generate-draft
           VITE_BASE_PATH: /wenzhangyijianpaiban/
 
       - name: Upload Pages artifact

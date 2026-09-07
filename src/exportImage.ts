@@ -1,5 +1,7 @@
 import { CARD_HEIGHT, CARD_WIDTH, type ResolvedCardStyle, type TextRoleStyle } from "./cardStyle";
 import type { ContentBlock, InlineColor, PageModel, TextSegment } from "./types";
+import { fitBlocksForPages } from "./pagination";
+import { splitTextGraphemes } from "./textUnits";
 
 const EXPORT_SCALE = 2;
 type DrawTextOptions = {
@@ -81,6 +83,14 @@ export function measureBlocksForPng(blocks: ContentBlock[], cardStyle: ResolvedC
   if (!ctx) return new Map<string, number>();
 
   return new Map(blocks.map((block) => [block.id, measureBlockHeight(ctx, block, cardStyle)]));
+}
+
+export function prepareBlocksForPng(blocks: ContentBlock[], cardStyle: ResolvedCardStyle) {
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) throw new Error("Canvas is unavailable.");
+  const measure = (block: ContentBlock) => measureBlockHeight(ctx, block, cardStyle);
+  const fitted = fitBlocksForPages(blocks, measure, cardStyle.contentHeight);
+  return { blocks: fitted, heights: new Map(fitted.map(block => [block.id, measure(block)])) };
 }
 
 function measureBlockHeight(
@@ -2113,27 +2123,40 @@ function wrapRichText(
   maxWidth: number,
 ): RichLine[] {
   const lines: RichLine[] = [];
-  let runs: TextRun[] = [];
+  let units: (TextRun & { width: number })[] = [];
   let width = 0;
+  const closing = /^[，。！？、；：”’」』）)\]}]/;
+  const opening = /^[“‘「『（(【\[]/;
+  const flush = () => {
+    if (!units.length) return;
+    const runs: TextRun[] = [];
+    units.forEach(unit => appendRun(runs, unit));
+    lines.push(makeRichLine(runs, width));
+    units = [];
+    width = 0;
+  };
 
   getBlockSegments(block).forEach((segment) => {
-    Array.from(segment.text).forEach((char) => {
+    splitTextGraphemes(segment.text).forEach((char) => {
       const charWidth = measureRunText(ctx, { ...segment, text: char }, options);
-      if (runs.length > 0 && width + charWidth > maxWidth) {
-        lines.push(makeRichLine(runs, width));
-        runs = [];
-        width = 0;
+      if (units.length > 0 && width + charWidth > maxWidth) {
+        const carry: typeof units = [];
+        if (closing.test(char) || opening.test(units[units.length - 1].text)) {
+          do {
+            const last = units.pop()!;
+            carry.unshift(last);
+            width -= last.width;
+          } while (units.length && (closing.test(carry[0].text) || opening.test(units[units.length - 1].text)));
+        }
+        flush();
+        units = carry;
+        width = carry.reduce((sum, unit) => sum + unit.width, 0);
       }
-
-      appendRun(runs, { ...segment, text: char });
+      units.push({ ...segment, text: char, width: charWidth });
       width += charWidth;
     });
   });
-
-  if (runs.length > 0) {
-    lines.push(makeRichLine(runs, width));
-  }
-
+  flush();
   return lines.length ? lines : [makeRichLine([{ text: "" }], 0)];
 }
 

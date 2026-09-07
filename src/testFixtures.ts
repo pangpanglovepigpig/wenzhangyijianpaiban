@@ -57,12 +57,6 @@ export const xiaomianLocalHeadings = [
   "第三件事，是给常见问题准备自己的判断。",
 ];
 
-export const xiaomianAiHeadings = [
-  ...xiaomianLocalHeadings,
-  "学校相关信息也要提前学会查。",
-  "准备到这里，必须开口。",
-  "陌生来电也值得提前处理。",
-];
 // Transcribed from the user's six Huizhou screenshots. Blank lines are layout
 // variants, not semantic constraints; every variant retains the same wording.
 export const huizhouArticle = `### 惠州教招：结构化卡住的那几秒
@@ -92,12 +86,3 @@ export const huizhouArticle = `### 惠州教招：结构化卡住的那几秒
 那几秒的空白没有你想得那么可怕。真正让人稳定下来的，也不是从此一句都不卡，而是你慢慢拥有几个能回去的地方：题目在问什么，我的判断是什么，现在讲到哪一步。
 
 下一次录音再卡住时，先别关掉。停一下，看一眼关键词，从断点继续。你练的不是毫无停顿地背完一篇答案，而是在紧张里，仍能把自己的话找回来。`;
-
-export const huizhouStructure = [
-  { quote: "练习时可以把准备时间只用来写三个极短的词：我的判断、处理顺序、最后要守住什么。", action: "h3" },
-  { quote: "还有一种卡顿，是太想说得漂亮。", action: "h3" },
-  { quote: "我建议把“卡住”单独拿出来练，而不是每次只追求完整答完。", action: "h3" },
-  { quote: "如果一开口就空白，可以降低难度。", action: "section" },
-  { quote: "也别只背素材。", action: "h3" },
-  { quote: "那几秒的空白没有你想得那么可怕。", action: "section" },
-] as const;

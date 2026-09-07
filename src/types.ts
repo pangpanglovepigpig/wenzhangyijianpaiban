@@ -36,14 +36,6 @@ export interface TextSegment {
   color?: InlineColor;
 }
 
-export interface DraftBlock {
-  type: BlockType;
-  text: string;
-  segments?: TextSegment[];
-  highlight?: boolean;
-  underline?: boolean;
-}
-
 export interface RenderConfig {
   markdown: string;
   themeMode: string;

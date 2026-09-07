@@ -113,18 +113,7 @@ h2 {
   outline: none;
 }
 
-.draft-error {
-  margin: -2px 12px 12px;
-  padding: 9px 11px;
-  border: 1px solid #efb8b8;
-  border-radius: 8px;
-  color: #a03737;
-  background: #fff8f8;
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.draft-notice {
+.layout-notice {
   margin: -2px 12px 12px;
   padding: 9px 11px;
   border: 1px solid #b9d7c8;

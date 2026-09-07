@@ -1,142 +1,108 @@
 import { describe, expect, test } from "vitest";
-import { applyStructureSuggestions, buildSentenceIndex, createBlocksFromText, draftPreservesSource, makeBlock, stabilizeAiDraftBlocks } from "./articleStructure.js";
-import { huizhouArticle, huizhouStructure, shenzhenArticle, xiaomianArticle } from "../src/testFixtures";
-import { createSourcePreservingDraft } from "../api/generate-draft.js";
+import { createBlocksFromText, formatArticle, layoutPreservesSource, validateLayoutResult } from "./articleStructure.js";
+import { huizhouArticle, shenzhenArticle, xiaomianArticle } from "../src/testFixtures";
 
-function suggestions(source: string, quotes = huizhouStructure) {
-  const sentences = buildSentenceIndex(source);
-  return quotes.map(({ quote, action }) => {
-    const sentence = sentences.find((item) => item.text === quote);
-    expect(sentence, quote).toBeDefined();
-    return { sentenceId: sentence!.sentenceId, action };
+const bodyText = (source: string) => createBlocksFromText(source).filter(b => b.type !== "hr").map(b => b.text).join("");
+const body = (source: string) => createBlocksFromText(source).filter(b => b.type === "p");
+const marked = (source: string) => body(source).flatMap(b => b.segments ?? []).filter(s => s.color || s.bold);
+
+describe("local layout regressions", () => {
+  test("does not invent a title from a long or multi-sentence opening", () => {
+    for (const source of ["这是第一句。这是第二句。\n\n继续讨论正文。", "这是一段没有标题的正文，".repeat(8) + "正文结束。", "今天我整理了复习资料。\n\n继续讨论正文。"])
+      expect(createBlocksFromText(source).every(b => b.type === "p")).toBe(true);
   });
-}
-function signature(blocks: ReturnType<typeof createBlocksFromText>) {
-  let offset = 0;
-  return blocks.map(({ type, text }) => {
-    const start = offset;
-    if (type !== "hr") offset += text.replace(/\s/g, "").length;
-    return { type, start, text };
-  }).filter((item) => item.type === "h3");
-}
-const paragraphs = huizhouArticle.split("\n\n");
-const variants = [
-  ["blank", huizhouArticle],
-  ["single", paragraphs.join("\n")],
-  ["continuous", paragraphs[0] + "\n" + paragraphs.slice(1).join("")],
-  ["soft-wrapped", paragraphs[0] + "\n" + paragraphs.slice(1).map((p) => p.match(/.{1,17}/gu)!.join("\n")).join("\n")],
-];
-
-describe("shared sentence-position structure", () => {
-  const expectedIndex = buildSentenceIndex(huizhouArticle);
-  const reference = applyStructureSuggestions(createBlocksFromText(huizhouArticle), suggestions(huizhouArticle), huizhouArticle);
-  test.each(variants)("keeps Huizhou suggestions at identical source positions: %s", (_label, source) => {
-    const index = buildSentenceIndex(source);
-    expect(index.map(({ sentenceId, start, end }) => ({ sentenceId, start, end })))
-      .toEqual(expectedIndex.map(({ sentenceId, start, end }) => ({ sentenceId, start, end })));
-    const base = createBlocksFromText(source);
-    expect(createSourcePreservingDraft(source).blocks).toEqual(base);
-    const stats = { accepted: 0, rejected: 0, reasons: {} };
-    const structured = applyStructureSuggestions(base, suggestions(huizhouArticle), source, stats);
-    expect(stats.rejected).toBe(0);
-    expect(signature(structured)).toEqual(signature(reference));
-    expect(draftPreservesSource(structured, source)).toBe(true);
-    expect(structured.filter((b) => b.highlight).length).toBeLessThanOrEqual(3);
-    expect(structured.filter((b) => b.underline).length).toBeLessThanOrEqual(3);
-    const stabilized = stabilizeAiDraftBlocks(structured, source);
-    expect(stabilized.map(({ type, text }) => ({ type, text })))
-      .toEqual(structured.map(({ type, text }) => ({ type, text })));
+  test("a question title is allowed but an unmarked later short sentence isn't a heading", () => {
+    const blocks = createBlocksFromText("你真的准备好了吗？\n\n这里是第一段正文，继续交代背景。\n\n那就这样\n\n这里接着说正文。");
+    expect(blocks[0].type).toBe("h1");
+    expect(blocks.find(b => b.text === "那就这样")?.type).toBe("p");
   });
-
-  test("does not split a quoted fragment or a semicolon clause into a heading", () => {
-    const source = '### 标题\n他说：“先停一下。”也别只背素材。比如把“先想一想。再开始说。”作为提示；仍要讲清自己的方法。后面继续解释。';
-    const index = buildSentenceIndex(source);
-    expect(index.slice(1).map((s) => s.text)).toEqual([
-      '他说：“先停一下。”', "也别只背素材。", '比如把“先想一想。再开始说。”作为提示；仍要讲清自己的方法。', "后面继续解释。",
-    ]);
-    expect(index.some((s) => s.text === "再开始说。")).toBe(false);
-    expect(index.some((s) => s.text.startsWith("仍要"))).toBe(false);
+  test("preserves explicit heading levels without turning the first heading into h1", () => {
+    expect(createBlocksFromText("## 二级\n正文。\n### 三级\n后文。\n# 一级\n结尾。").filter(b => /^h[123]$/.test(b.type)).map(b => b.type))
+      .toEqual(["h2", "h3", "h1"]);
   });
-
-  test("local structural headings also use full sentences, not semicolon fragments", () => {
-    const source = "### 完整标题\n\n首先要明确方向；再按步骤完成准备。后面解释具体安排。";
+  test("keeps bullets and consecutive numbered items as body, including their markers", () => {
+    for (const prefix of ["- ", "* ", "+ ", "• "]) {
+      const source = `材料准备\n\n${prefix}身份证\n${prefix}毕业证\n${prefix}学位证\n\n这些材料需要提前整理。`;
+      expect(body(source).map(b => b.text)).toEqual([`${prefix}身份证`, `${prefix}毕业证`, `${prefix}学位证`, "这些材料需要提前整理。"]);
+      expect(layoutPreservesSource(createBlocksFromText(source), source)).toBe(true);
+    }
+    expect(body("材料\n\n1. 身份证\n2. 毕业证\n3. 学位证").map(b => b.text)).toEqual(["1. 身份证", "2. 毕业证", "3. 学位证"]);
+    expect(createBlocksFromText("材料\n\n1. 身份证\n2. 毕业证\n3. 学位证\n\n这里用一个完整的自然段来解释材料提交的注意事项。").filter(b => b.type === "h2")).toEqual([]);
+  });
+  test("a numbered heading needs a following explanation", () => {
+    expect(createBlocksFromText("材料准备\n\n一、核对资格\n\n这里具体解释如何核对报名条件。\n\n二、整理文件\n\n这里继续介绍需要准备的文件。").filter(b => b.type === "h2").map(b => b.text))
+      .toEqual(["一、核对资格", "二、整理文件"]);
+  });
+  test("does not emphasize ordinary narratives with 可以、最后、真正", () => {
+    const source = "复习记录\n\n今天可以在家看书，也可以去图书馆。\n\n最后我回到家里，整理好桌子就休息了。\n\n这才是真正的周末，我和朋友喝了一杯茶。";
+    expect(marked(source + "\n\n" + "窗外天气很好，树上的叶子随风摇动。".repeat(30))).toEqual([]);
+    expect(body(source).some(b => b.highlight || b.underline)).toBe(false);
+  });
+  test("keeps nested closing quotes and brackets attached, even in long sentences", () => {
+    const source = `讨论记录\n\n老师说：“不要着急。先读完整段材料，再回答问题。”随后大家开始阅读。\n\n他提醒：“记住‘先看题。再回答。’这句话。”\n\n${"背景文字，".repeat(24)}（里面有逗号，还有提示；以及数字3.14）。后面继续。`;
+    expect(body(source).every(b => !/^[”’」』）)]/.test(b.text))).toBe(true);
+    expect(layoutPreservesSource(createBlocksFromText(source), source)).toBe(true);
+    expect(bodyText(source)).toContain("‘先看题。再回答。’");
+  });
+  test("keeps inline quoted sentences together rather than splitting the quotation", () => {
+    const quote = '“先想一想。再开始说。”';
+    const source = "标题\n\n" + "铺垫内容。".repeat(14) + "比如把" + quote + "作为提示。";
+    expect(body(source).some(b => b.text.includes(quote))).toBe(true);
+  });
+  test("preserves decimal numbers, dates, URLs, emoji and repeated sentences", () => {
+    const source = "内容检查\n\n" + "背景内容，".repeat(25) + "比例3.14%，预算1,200元，时间09:30，日期2026-09-07，网址https://example.com/a?x=1&y=2。重复一句。重复一句。😀👨‍👩‍👧‍👦 English words。";
     const blocks = createBlocksFromText(source);
-    expect(signature(blocks).map((s) => s.text)).toEqual(["首先要明确方向；再按步骤完成准备。"]);
-    expect(draftPreservesSource(blocks, source)).toBe(true);
+    expect(layoutPreservesSource(blocks, source)).toBe(true);
+    for (const fragment of ["3.14%", "1,200", "09:30", "2026-09-07", "https://example.com/a?x=1&y=2", "👨‍👩‍👧‍👦"])
+      expect(blocks.some(b => b.text.includes(fragment))).toBe(true);
+    expect(bodyText(source).match(/重复一句。/g)).toHaveLength(2);
   });
+  test("merges copying wraps without merging real WPS paragraphs", () => {
+    const source = "复习安排\n我先介绍一段较长的\n背景内容，再接着解释。\n这是第二个完整自然段。";
+    expect(body(source).map(b => b.text)).toEqual(["我先介绍一段较长的背景内容，再接着解释。", "这是第二个完整自然段。"]);
+  });
+  test("does not create sections without enough preceding context", () => {
+    const source = "复习安排\n\n一句背景。\n\n具体做法是先检查材料，再决定安排。";
+    expect(createBlocksFromText(source).filter(b => b.type === "hr")).toHaveLength(1);
+  });
+  test.each([huizhouArticle, shenzhenArticle, xiaomianArticle])("retains real article content and bounds emphasis", source => {
+    const blocks = createBlocksFromText(source);
+    expect(layoutPreservesSource(blocks, source)).toBe(true);
+    expect(blocks).toEqual(createBlocksFromText(source));
+    let sectionCount = 0, totalCount = 0, markedChars = 0, bodyChars = 0;
+    for (const block of blocks) {
+      if (block.type === "hr") { expect(sectionCount).toBeLessThanOrEqual(2); sectionCount = 0; }
+      if (block.type !== "p") continue;
+      bodyChars += Array.from(block.text.replace(/\s/g, "")).length;
+      const marks = block.segments?.filter(s => s.color || s.bold) ?? [];
+      expect(marks.length).toBeLessThanOrEqual(1);
+      expect(block.highlight || block.underline).toBe(false);
+      for (const mark of marks) {
+        expect(mark.bold).toBeUndefined();
+        markedChars += Array.from(mark.text.replace(/\s/g, "")).length;
+        totalCount += 1; sectionCount += 1;
+      }
+    }
+    expect(sectionCount).toBeLessThanOrEqual(2);
+    expect(totalCount).toBeGreaterThan(0);
+    expect(totalCount).toBeLessThanOrEqual(6);
+    expect(markedChars).toBeLessThanOrEqual(Math.floor(bodyChars * 0.2));
+  });
+  test("falls back to original lines with a notice if text or styled segments change", () => {
+    const source = "# 标题\n\n- 项目\n\n原文，保留标点。";
+    for (const corrupted of [[{ type: "p" as const, text: "改写", highlight: false, underline: false }],
+      createBlocksFromText(source).map(b => b.type === "p" ? { ...b, segments: [{ text: "错误" }] } : b)]) {
+      const result = validateLayoutResult(corrupted, source);
+      expect(result.notice).toContain("已保留原段落");
+      expect(layoutPreservesSource(result.blocks, source)).toBe(true);
+    }
+  });
+  test("empty input stays empty instead of substituting the sample", () => {
+    expect(formatArticle(" \n\t")).toEqual({ blocks: [] });
+  });
+});
 
-  test("allows exactly one occurrence of a repeated sentence to be selected by ID", () => {
-    const source = "### 重复测试\n也别只背素材。这里继续解释第一个主题。也别只背素材。这里继续解释第二个主题。";
-    const repeated = buildSentenceIndex(source).filter((s) => s.text === "也别只背素材。");
-    const structured = applyStructureSuggestions(createBlocksFromText(source), [{ sentenceId: repeated[1].sentenceId, action: "h3" }], source);
-    expect(signature(structured)).toEqual([{ type: "h3", start: repeated[1].start, text: "也别只背素材。" }]);
-    expect(draftPreservesSource(structured, source)).toBe(true);
-  });
-
-  test("rejects an adjacent structure item rather than leaving a heading without body", () => {
-    const source = "### 相邻结构\n建立清楚的方法。也别只背素材。这里继续解释具体做法。";
-    const index = buildSentenceIndex(source);
-    const stats = { accepted: 0, rejected: 0, reasons: {} };
-    const structured = applyStructureSuggestions(createBlocksFromText(source), [
-      { sentenceId: index[1].sentenceId, action: "h3" },
-      { sentenceId: index[2].sentenceId, action: "h3" },
-    ], source, stats);
-    expect(signature(structured).map((s) => s.text)).toEqual(["建立清楚的方法。"]);
-    expect(stats.reasons).toEqual({ adjacent_structure: 1 });
-    expect(draftPreservesSource(structured, source)).toBe(true);
-  });
-
-  test("keeps valid suggestions when IDs, actions, partial quotes and questions are invalid", () => {
-    const source = '### 安全测试\n先解释一点背景。你真的想好了吗？也别只背素材。这里展开具体说明。';
-    const index = buildSentenceIndex(source);
-    const stats = { accepted: 0, rejected: 0, reasons: {} };
-    const structured = applyStructureSuggestions(createBlocksFromText(source), [
-      null, { sentenceId: "s9999", action: "h3" }, { sentenceId: "s1", action: "h3" },
-      { sentenceId: index[2].sentenceId, action: "h3" },
-      { quote: "背景。你真的", action: "h3" },
-      { sentenceId: index[3].sentenceId, action: "h2" },
-      { sentenceId: index[3].sentenceId, action: "h3" },
-      { sentenceId: index[3].sentenceId, action: "h3" },
-    ], source, stats);
-    expect(signature(structured).map((s) => s.text)).toEqual(["也别只背素材。"]);
-    expect(stats).toMatchObject({ accepted: 1, rejected: 7 });
-    expect(draftPreservesSource(structured, source)).toBe(true);
-    expect(stabilizeAiDraftBlocks(structured, source)).toEqual(structured);
-  });
-
-  test("keeps manual headings/dividers and does not revoke other AI titles beside a short local heading", () => {
-    const source = "### 主标题\n\n发布前检查\n\n正文没有任何新的修改。也别只背素材。这里继续解释具体行动。\n\n---\n\n### 手工标题\n\n这是最后正文。";
-    const index = buildSentenceIndex(source);
-    const base = createBlocksFromText(source);
-    const target = index.find((s) => s.text === "也别只背素材。")!;
-    const structured = applyStructureSuggestions(base, [{ sentenceId: target.sentenceId, action: "h3" }], source);
-    expect(createSourcePreservingDraft(source).blocks).toEqual(base);
-    expect(stabilizeAiDraftBlocks(structured, source)).toEqual(structured);
-    expect(structured.some((b) => b.type === "h2" && b.text === "发布前检查")).toBe(true);
-    expect(signature(structured).map((s) => s.text)).toEqual(["也别只背素材。", "手工标题"]);
-  });
-
-  test("rejects a forged partial title independently in the browser", () => {
-    const source = "### 主标题\n这里先解释原有的背景。也别只背素材。这里继续解释具体方法。";
-    const base = createBlocksFromText(source);
-    const target = buildSentenceIndex(source).find((s) => s.text === "也别只背素材。")!;
-    const valid = applyStructureSuggestions(base, [{ sentenceId: target.sentenceId, action: "h3" }], source);
-    const ai = valid.flatMap((block) => block.text === "这里先解释原有的背景。"
-      ? [makeBlock("h3", "这里先解释"), makeBlock("p", "原有的背景。")] : [block]);
-    expect(stabilizeAiDraftBlocks(ai, source).map(({ type, text }) => ({ type, text })))
-      .toEqual(valid.map(({ type, text }) => ({ type, text })));
-  });
-
-  test.each([shenzhenArticle, xiaomianArticle])("shares fallback exactly for previous articles", (source) => {
-    expect(createSourcePreservingDraft(source).blocks).toEqual(createBlocksFromText(source));
-    expect(draftPreservesSource(createBlocksFromText(source), source)).toBe(true);
-  });
-
-  test("preserves astral characters and spaces when splitting source ranges", () => {
-    const source = "### 标题\n前文有 emoji 😀 和 English words。也别只背素材。这里展开后续内容。";
-    const target = buildSentenceIndex(source).find((s) => s.text === "也别只背素材。")!;
-    const blocks = applyStructureSuggestions(createBlocksFromText(source), [{ sentenceId: target.sentenceId, action: "h3" }], source);
-    expect(draftPreservesSource(blocks, source)).toBe(true);
-    expect(signature(blocks).map((s) => s.text)).toEqual(["也别只背素材。"]);
-  });
+test("promotes explicit action openings but not ordinary narrated sequences", () => {
+  const blocks = createBlocksFromText("准备安排\n\n先从自己这里划边界。后面逐项解释如何确定资格与方向。\n\n接着把学校放进待了解区。这里继续解释下一步的操作。\n\n最后，我回到家里。窗外的树叶缓缓落下。");
+  expect(blocks.filter(b => b.type === "h3").map(b => b.text)).toEqual(["先从自己这里划边界。", "接着把学校放进待了解区。"]);
 });
