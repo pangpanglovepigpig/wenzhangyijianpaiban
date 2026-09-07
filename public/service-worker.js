@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "xiaohongshu-article-notes-";
-const CACHE_NAME = `${CACHE_PREFIX}v15`;
+const CACHE_NAME = `${CACHE_PREFIX}v16`;
 const APP_SCOPE = new URL(self.registration.scope);
 const ROOT_URL = APP_SCOPE.toString();
 const INDEX_URL = new URL("index.html", APP_SCOPE).toString();

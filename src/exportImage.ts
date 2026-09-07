@@ -104,6 +104,8 @@ export function prepareBlocksForPng(blocks: ContentBlock[], cardStyle: ResolvedC
     for (let index = 0; index < lines.length - 1; index += 1) {
       offset += lines[index].text.length;
       if (index < 1) continue;
+      // Do not strand a few remaining characters at the start of the next page.
+      if (splitTextGraphemes(block.text.slice(offset).replace(/\s/g, "")).length < 12) continue;
       if (measure(sliceBlock(block, 0, offset)) <= available) best = offset;
       else break;
     }

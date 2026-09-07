@@ -58,6 +58,7 @@ function buildLocalBlocks(input) {
     const blocks = [];
     let sectionTexts = [];
     const numberedMatters = getOrderedNumberedMatterHeadingLines(lines);
+    const structuralHeadings = selectStructuralHeadings(lines, numberedMatters);
     lines.forEach((line, index) => {
         if (markdownDividerPattern.test(line.text)) {
             addDividerIfNeeded(blocks, "manual");
@@ -79,11 +80,8 @@ function buildLocalBlocks(input) {
             sectionTexts.push(line.text);
             return;
         }
-        const structural = splitLeadingStructuralHeading(line.text, numberedMatters.has(line.text));
-        const following = lines[index + 1];
-        const hasBody = structural?.remainder || (isFollowingBody(following) &&
-            !splitLeadingStructuralHeading(following.text, numberedMatters.has(following.text)));
-        if (structural && hasBody) {
+        const structural = structuralHeadings.get(index);
+        if (structural) {
             addDividerIfNeeded(blocks, "auto", true);
             blocks.push(makeBlock("h3", structural.heading));
             sectionTexts = [];
@@ -218,20 +216,82 @@ function boundaryRanges(text, soft = false) {
     return ranges;
 }
 function sentenceRanges(text) { return boundaryRanges(text); }
-function splitLeadingStructuralHeading(text, allowNumberedMatter) {
+// Extract only a whole opening sentence; all offsets refer to the original line.
+function extractHeadingCandidate(text, allowNumberedMatter) {
     const first = sentenceRanges(text)[0];
     if (!first?.complete) return null;
     const heading = text.slice(0, first.end).trim();
+    if (lengthOf(heading) > 40 || /[？?]/.test(heading)) return null;
+    const category = classifyHeading(heading, allowNumberedMatter);
+    if (!category || lengthOf(heading) < (category.shortStep ? 5 : 8)) return null;
+    return { heading, remainder: text.slice(first.end).trim(), end: first.end, ...category };
+}
+
+function classifyHeading(heading, allowNumberedMatter) {
+    // Repeated practice rounds are details within a method, not new major sections.
+    if (/^第[一二三四五六七八九十\d]+(?:遍|轮|次)/.test(heading)) return null;
+    if (/^(?:我|他|她|昨天|今天|刚才|后来)/.test(heading)) return null;
+    if (/^(?:首先|其次|再次|最后)[，,：:]?(?:我|他|她|大家)|^(?:开头|开场|中间部分|结尾|收尾)用[了过]/.test(heading)) return null;
+    const action = /用|要|把|围绕|交代|选择|决定|明确|整理|完成|检查|核对|确认|准备|判断|练|换|做|看|留下|记录|投递/;
+    const position = /^(?:开头|开场|中间(?:部分)?|结尾|收尾)(?:用|要|不要|别|把|围绕|先|只|可以)/.test(heading);
+    const dimension = /^(?:先|再|接着)看/.test(heading) ||
+        /^还有(?:一个|一笔|一项|一种).{0,10}(?:账|成本|条件|问题|维度)[：:]/.test(heading);
+    const transition = /^(?:接下来|下一步|然后)(?:才是|是|要|需要|开始|再)/.test(heading);
+    const stage = /^.{2,12}(?:写完|做完|结束|建立|完成|整理)(?:以后|之后|后)[，,]/.test(heading) ||
+        /^(?:决定(?:去|参加|报名|投递|出发)|回来|返回|收到通知)(?:以后|之后|后)[，,]/.test(heading) ||
+        /^如果(?:决定|选择)(?:不|放弃).{1,12}[，,]/.test(heading);
+    const timing = /^.{2,12}(?:前|之前)(?:最好|先|要|需要|应当|应该|[，,])/.test(heading) ||
+        /^每隔[一二三四五六七八九十两到至\d]+(?:天|周|次)[，,]/.test(heading);
+    const comparison = /^.{2,12}是(?:另一个|另一项|另一种).{0,8}(?:卡点|难点|重点|问题|成本)/.test(heading) ||
+        /^第[一二三四五六七八九十\d]+(?:科|类|项|组|部分)(?:不是|则|要|需要|是|以|用)/.test(heading);
+    const strategy = /^优先(?:把|处理|解决|完成|检查|补|救)/.test(heading) ||
+        /^.{2,12}(?:至少|最好|也不要).{0,16}(?:核[一二两三四五六七八九十\d]|检查|核对|确认|只设|只看)/.test(heading);
+    const requirement = /^.{2,20}(?:每个|每一|所有).{1,8}(?:都要|必须).{2,16}(?:一致|核实|核对|确认|对应|检查)/.test(heading);
+    if (position || dimension || comparison || strategy || ((transition || timing) && action.test(heading)))
+        return { category: "major-step", priority: 10, shortStep: true };
+    if ((stage && action.test(heading)) || requirement)
+        return { category: "stage", priority: 9 };
     const numbered = allowNumberedMatter && numberedMatterOpeningPattern.test(heading);
-    const method = /^(挑|选|找|留)(?:一|出)|^这时(?:可以|要|先)|^.{2,12}(?:也不必|不必立刻|可以先|需要先)/.test(heading);
+    const method = /^(挑|选|找|留)(?:一|出)|^这时(?:可以|要|先)|^.{2,12}(?:也不必|不必立刻|可以先|需要先)|^你可以为.{2,12}(?:设|留|建立|准备)/.test(heading);
     const scope = /^普通.{2,12}也可以.{2,16}范围/.test(heading) || /^(真正|普通).{2,20}(?:范围|学校|目标).{0,12}(?:不需要|也可以|不必)/.test(heading);
-    const stage = /^.{2,12}(?:建立|完成|整理)(?:以后|之后)[，,]/.test(heading);
     const conclusion = /^(所以|因此|总之)[，,]?(?:不要|别|不必)|^.{2,12}不是.{1,12}越.{1,12}越/.test(heading);
-    if (lengthOf(heading) < 8 || lengthOf(heading) > 40 ||
-        /[？?]/.test(heading) || (!numbered && !method && !scope && !stage && !conclusion && !structuralHeadingOpeningPattern.test(heading))) return null;
-    if (/^(首先|其次|再次|最后[，,：:])/.test(heading) &&
-        !/(要|需要|把|核对|检查|准备|确认|选择|决定|明确|目标|判断|整理|完成)/.test(heading)) return null;
-    return { heading, remainder: text.slice(first.end).trim() };
+    if (/^(首先|其次|再次|最后[，,：:])/.test(heading) && !action.test(heading)) return null;
+    if (numbered || structuralHeadingOpeningPattern.test(heading))
+        return { category: "step", priority: 9 };
+    if (method) return { category: "method", priority: 8 };
+    if (scope || conclusion) return { category: "viewpoint", priority: 7 };
+    return null;
+}
+
+function selectStructuralHeadings(lines, numberedMatters) {
+    const explicitType = (line, index) => getMarkdownHeading(line.text) ||
+        (index === 0 && isTitleLike(line, lines[index + 1])) || isSubheadingLike(line, lines[index + 1]);
+    const extracted = lines.map((line, index) => !explicitType(line, index) && !isListLine(line.text) &&
+        !markdownDividerPattern.test(line.text) ? extractHeadingCandidate(line.text, numberedMatters.has(line.text)) : null);
+    const candidates = [];
+    let offset = 0, group = 0;
+    lines.forEach((line, index) => {
+        if (explicitType(line, index)) { group += 1; return; }
+        if (markdownDividerPattern.test(line.text)) return;
+        const candidate = extracted[index];
+        const hasBody = candidate && (isFollowingBody({ text: candidate.remainder }) ||
+            (!candidate.remainder && isFollowingBody(lines[index + 1]) && !extracted[index + 1]));
+        if (hasBody) candidates.push({ ...candidate, index, group, start: offset,
+            bodyStart: offset + lengthOf(line.text.slice(0, candidate.end)) });
+        offset += lengthOf(line.text);
+    });
+    const selected = [];
+    // Select strongest section boundaries first, with deterministic reading-order ties.
+    // Rejected candidate sentences remain in the body and count towards the 60-char gap.
+    for (const candidate of candidates.sort((a, b) => b.priority - a.priority || a.index - b.index)) {
+        const tooClose = selected.some(other => {
+            if (other.group !== candidate.group) return false;
+            const [before, after] = other.index < candidate.index ? [other, candidate] : [candidate, other];
+            return after.start - before.bodyStart < 60;
+        });
+        if (!tooClose) selected.push(candidate);
+    }
+    return new Map(selected.map(candidate => [candidate.index, candidate]));
 }
 function splitIntoInfoBlocks(text) {
     const units = sentenceRanges(text).flatMap((range) => {
@@ -265,12 +325,16 @@ function splitIntoInfoBlocks(text) {
 function emphasisScore(text) {
     const clean = text.replace(/能不能|要不要|需不需要/g, "");
     if (/[？?]/.test(clean)) return null;
-    const risk = /(?:^|[，,：:])(?:不要|不能|不应|避免|必须|务必|千万别|注意(?!力)|警惕|别把)|一定要|不等于|不代表|误认为|不该|否则|超出承受|容易把|最没用/.test(clean);
+    const risk = /(?:^|[，,：:])(?:(?:就)?不要|(?:就)?别(?:再|只|急|为了|停|把|让)|不能|不应|避免|必须|务必|千万别|注意(?!力)|警惕)|一定要|不等于|不代表|误认为|不该|否则|超出承受|容易把|最没用/.test(clean);
     const contrast = /不是.{1,30}而是|不是.{1,30}只是|不在.{1,20}而在|不只是|不总是|并不总是|不必.{1,20}但/.test(clean);
     const conclusion = /关键(?:是|在于)|核心(?:是|在于)|结论是|至少要(?:建立|明确|确定)|值得.{0,18}但不适合|真正要调整|才是(?:结构|关键|核心|目标|解决)|才看得见|才看得清|就比|会比|说明|意味着|只要.{2,24}就|不是同一件事|逐字稿.{0,6}压缩|每一步.{0,10}判断/.test(clean);
+    const goal = /(?:目标|目的)(?:是|不是).{3,}/.test(clean) && !/^(?:我|他|她|昨天|今天)/.test(clean);
+    const relationship = /越.{2,24}[，,].{0,12}越.{2,24}/.test(clean) &&
+        /明确|具体|清楚|真实|准备|判断|目标|材料|表达|问题|信息|边界/.test(clean);
+    const requirement = /(?:只需要|只要|必须|务必|一定要)(?:保证|确认|检查|核对)|(?:每个|每一|所有).{1,12}(?:都要|必须).{2,}/.test(clean);
     const action = /(?:^|[，,：:])(?:把|先|再|用|让|问得|一次只|每次)|建议|具体做法|方法是|核对|检查|确认|主问题|问题链|提前整理/.test(clean);
-    if (contrast || conclusion) return { score: 10, style: "highlight" };
-    if (risk) return { score: 9, style: "underline" };
+    if (contrast || conclusion || goal || relationship) return { score: 10, style: "highlight" };
+    if (risk || requirement) return { score: 9, style: "underline" };
     if (action && /建议|具体|先|再|需要|要|把|每次|一次/.test(clean)) return { score: 7, style: "color" };
     return null;
 }

@@ -56,7 +56,12 @@ try {
   const results = [];
   for (const article of [...cases, ...privateArticles]) {
     const images = await layout(article.text);
-    results.push({ title: article.title, characters: article.text.length, images });
+    const markdown = await page.locator('textarea[aria-label="Markdown 输出"]').inputValue();
+    const headings = markdown.split('\n').filter(line => line.startsWith('### ')).map(line => line.slice(4));
+    for (const heading of article.requiredHeadings || []) assert(headings.includes(heading), `Missing heading: ${heading}`);
+    for (const heading of article.forbiddenHeadings || []) assert(!headings.includes(heading), `Unexpected heading: ${heading}`);
+    if (article.headingRange) assert(headings.length >= article.headingRange[0] && headings.length <= article.headingRange[1], `Heading density: ${article.title}: ${headings.length}`);
+    results.push({ title: article.title, characters: article.text.length, images, headings });
   }
   await page.locator('.preview-image').first().screenshot({ path: path.join(output, 'preview-first.png') });
   await page.screenshot({ path: path.join(output, 'mobile.png') });
@@ -75,6 +80,7 @@ try {
         const used = p.blocks.reduce((sum, b) => sum + measured.get(b.id), 0);
         if (used > style.contentHeight + 0.01) throw new Error('Page overflow: ' + theme.id);
         for (let i = 0; i < p.blocks.length; i++) {
+          if (p.blocks[i].id.includes('-tail-') && Array.from(p.blocks[i].text.replace(/\s/g, '')).length < 12) throw new Error('Short page remainder: ' + theme.id);
           if (p.blocks[i].type === 'h3' && p.blocks[i - 1]?.type !== 'hr') throw new Error('Missing h3 divider: ' + theme.id);
         }
         if (pages.indexOf(p) < pages.length - 1 && /^(?:hr|h[123])$/.test(p.blocks[p.blocks.length - 1].type)) throw new Error('Orphan heading: ' + theme.id);

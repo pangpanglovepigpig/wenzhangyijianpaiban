@@ -102,13 +102,13 @@ describe("local layout regressions", () => {
 });
 
 test("promotes explicit action openings but not ordinary narrated sequences", () => {
-  const blocks = createBlocksFromText("准备安排\n\n先从自己这里划边界。后面逐项解释如何确定资格与方向。\n\n接着把学校放进待了解区。这里继续解释下一步的操作。\n\n最后，我回到家里。窗外的树叶缓缓落下。");
+  const blocks = createBlocksFromText("准备安排\n\n先从自己这里划边界。后面逐项解释如何确定资格与方向。这一段继续解释具体背景、处理方法和判断依据，让读者理解这一步为什么需要这样安排。这一段继续解释具体背景、处理方法和判断依据，让读者理解这一步为什么需要这样安排。\n\n接着把学校放进待了解区。这里继续解释下一步的操作。\n\n最后，我回到家里。窗外的树叶缓缓落下。");
   expect(blocks.filter(b => b.type === "h3").map(b => b.text)).toEqual(["先从自己这里划边界。", "接着把学校放进待了解区。"]);
 });
 
 test("finds method changes and viewpoint headings without changing their wording", () => {
   const headings = ["挑一个最影响课堂的五分钟。", "逐字稿也不必立刻扔掉。", "真正进入重点范围的学校，不需要很多。", "普通学校也可以放进重点范围。", "名单建立以后，每次投递都留下原因和状态。"];
-  const source = "# 标题\n\n" + headings.map(h => h + "这里继续解释具体操作，以及这样安排的原因和后续步骤。").join("\n\n");
+  const source = "# 标题\n\n" + headings.map(h => h + "这里继续解释具体操作，以及这样安排的原因和后续步骤。".repeat(3)).join("\n\n");
   const blocks = createBlocksFromText(source);
   expect(blocks.filter(b => b.type === "h3").map(b => b.text)).toEqual(headings);
   for (const [index, block] of blocks.entries()) {
@@ -152,4 +152,62 @@ test("adds one divider before explicit h3 headings, including the first block", 
   expect(blocks.map(b => b.type)).toEqual(["hr", "h3", "p", "hr", "h3", "p"]);
   expect(blocks[3].dividerSource).toBe("manual");
   expect(layoutPreservesSource(blocks, source)).toBe(true);
+});
+
+const explanation = "这里继续说明背景、操作方式与判断依据，帮助读者理解每个阶段为什么需要这样安排，并通过具体情境说明实际限制和后续处理方式，避免只看到一句结论。";
+const headingTexts = (source: string) => createBlocksFromText(source).filter(b => b.type === "h3").map(b => b.text);
+
+test.each([
+  "开头用最短的时间交代身份。", "中间部分围绕主印象选两项证据。", "结尾不要突然拔高成口号。",
+  "稿子写完后，先做三种长度。", "接下来才是练习。", "再看替代性。",
+  "还有一个更现实的账：这一天原本要做什么。", "决定去以后，不要空着手坐到最后。",
+  "回来以后，宣讲会才算完成。", "如果决定不去，也不用用一整天刷现场动态惩罚自己。",
+  "收尾先核对关键数据。", "练习结束后，再整理记录。",
+  "提交前先检查证明文件。", "每隔两周，用一次复盘检查计划。",
+  "第二组则需要保持练习。", "文件编号至少核两次。", "优先解决最影响进度的问题。",
+])("recognizes a major step with explanatory body: %s", heading => {
+  const source = "# 标题\n\n" + heading + explanation;
+  const blocks = createBlocksFromText(source);
+  expect(headingTexts(source)).toEqual([heading]);
+  expect(layoutPreservesSource(blocks, source)).toBe(true);
+  expect(blocks.filter(b => b.type === "p").map(b => b.text).join("")).toBe(explanation);
+});
+
+test("keeps repeated rounds as details inside the practice section", () => {
+  const source = "# 标题\n\n接下来才是练习。" + explanation + "\n\n第三遍练被打断。" + explanation + "\n\n第四遍把稿子放远。" + explanation;
+  expect(headingTexts(source)).toEqual(["接下来才是练习。"]);
+  expect(layoutPreservesSource(createBlocksFromText(source), source)).toBe(true);
+});
+
+test.each(["最后，我完成了报名。", "开头用了一张照片。", "昨天我检查了材料。", "第三遍我终于说顺了。", "接下来天气会晴朗。", "再看什么？", "天气很好。"])("does not promote narrative or ambiguous short sentences: %s", sentence => {
+  expect(headingTexts("# 标题\n\n" + sentence + explanation)).toEqual([]);
+});
+
+test.each([59, 60])("requires sixty body characters between automatic headings: %i", count => {
+  const first = "挑一个有用的练习。", second = "开头先交代讨论范围。";
+  const source = "# 标题\n\n" + first + "文".repeat(count - 1) + "。\n\n" + second + explanation;
+  expect(headingTexts(source)).toEqual(count < 60 ? [second] : [first, second]);
+  expect(layoutPreservesSource(createBlocksFromText(source), source)).toBe(true);
+});
+
+test("explicit Markdown headings remain exempt from density filtering", () => {
+  expect(headingTexts("### 甲\n\n一句解释。\n\n### 乙\n\n另一句解释。")).toEqual(["甲", "乙"]);
+});
+
+test("extracts only the opening sentence, keeps list items and repeated source text", () => {
+  const source = "# 标题\n\n这里交代背景。开头先检查材料。" + explanation + "\n\n- 结尾先核对数据。\n- 中间部分要比较差别。\n\n开头先检查材料。" + explanation + "\n\n开头先检查材料。" + explanation + "\n\n记录数字3.14、https://example.com/a和😀👨‍👩‍👧‍👦。";
+  const blocks = createBlocksFromText(source);
+  expect(headingTexts(source)).toEqual(["开头先检查材料。", "开头先检查材料。"]);
+  expect(layoutPreservesSource(blocks, source)).toBe(true);
+  expect(blocks).toEqual(createBlocksFromText(source));
+});
+
+test("recognizes complete goal, result and requirement relationships without marking bare keywords", () => {
+  const candidates = ["你的目标是把真实信息说清楚。", "材料越具体，你越清楚需要核对什么。", "只需要保证所有材料的基本事实一致。"];
+  const source = "# 标题\n\n" + candidates.map(c => c + explanation.repeat(2)).join("\n\n");
+  const marks = marked(source);
+  for (const sentence of candidates) expect(marks.some(s => s.text.includes(sentence))).toBe(true);
+  expect(marks.some(s => s.highlight)).toBe(true);
+  expect(marks.some(s => s.underline)).toBe(true);
+  expect(marked("# 标题\n\n目标、关键和结果写在黑板上。" + explanation.repeat(2))).toEqual([]);
 });
