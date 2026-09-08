@@ -49,6 +49,8 @@ try {
   await page.goto(url, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => !!navigator.serviceWorker.controller);
   await ready();
+  const cacheVersions = await page.evaluate(() => caches.keys());
+  if (process.env.LAYOUT_QA_CACHE) assert.deepEqual(cacheVersions.filter(k => k.startsWith('xiaohongshu-article-notes-')), [process.env.LAYOUT_QA_CACHE]);
   assert.match(await page.locator('body').innerText(), /本地自动排版，文章无需上传/);
   await page.addScriptTag({ content: runtime.outputFiles[0].text });
   const privateArticles = process.env.LAYOUT_QA_ARTICLES ? JSON.parse(await fs.readFile(process.env.LAYOUT_QA_ARTICLES, 'utf8')) : [];
@@ -69,6 +71,7 @@ try {
     const q = window.layoutQA;
     const articles = [...q.articles, ...extras.map(a => a.text), '长引文\n\n老师说：“' + '这是很长的一段引文，没有安全断句位置，'.repeat(90) + '”'];
     let checkedPages = 0;
+    const pageReviews = [];
     for (const article of articles) for (const theme of q.THEME_OPTIONS) for (const size of [14, 16.5, 20]) {
       const blocks = q.createBlocksFromText(article);
       const style = q.resolveCardStyle({ themeId: theme.id, fontFamilyId: 'system', baseFontSize: size });
@@ -85,9 +88,18 @@ try {
         }
         if (pages.indexOf(p) < pages.length - 1 && /^(?:hr|h[123])$/.test(p.blocks[p.blocks.length - 1].type)) throw new Error('Orphan heading: ' + theme.id);
       }
+      if (size === 16.5 && ['apple-notes', 'taro-purple'].includes(theme.id)) {
+        pageReviews.push({ title: article.split('\n')[0], theme: theme.id, pages: pages.map((p, index) => {
+          const marks = p.blocks.flatMap(b => b.segments || []).filter(s => s.highlight || s.underline || s.color);
+          return { page: index + 1, headings: p.blocks.filter(b => b.type === 'h3').map(b => b.text),
+            highlight: marks.filter(s => s.highlight).length, underline: marks.filter(s => s.underline).length,
+            color: marks.filter(s => s.color).length, marks: marks.length,
+            fill: p.blocks.reduce((sum, b) => sum + measured.get(b.id), 0) / style.contentHeight };
+        }) });
+      }
       checkedPages += pages.length;
     }
-    return { checkedPages, combinations: articles.length * q.THEME_OPTIONS.length * 3 };
+    return { checkedPages, pageReviews, combinations: articles.length * q.THEME_OPTIONS.length * 3 };
   }, privateArticles);
   // Throttle JavaScript to approximate a slower phone; this is not a physical-device measurement.
   const cdp = await context.newCDPSession(page);
@@ -136,7 +148,7 @@ try {
   assert.deepEqual(networkAfterLoad, []);
   assert.deepEqual(forbidden, []);
   assert.deepEqual(errors, []);
-  const report = { url, results, measurements, ruleMs, offlineLayout: true, offlineDownload: true, manualEdits: true,
+  const report = { url, cacheVersions, results, measurements, ruleMs, offlineLayout: true, offlineDownload: true, manualEdits: true,
     previewRetry: true, noAiRequests: true, pageErrors: errors, output };
   await fs.writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));

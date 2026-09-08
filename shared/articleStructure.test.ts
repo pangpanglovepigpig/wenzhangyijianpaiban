@@ -211,3 +211,62 @@ test("recognizes complete goal, result and requirement relationships without mar
   expect(marks.some(s => s.underline)).toBe(true);
   expect(marked("# 标题\n\n目标、关键和结果写在黑板上。" + explanation.repeat(2))).toEqual([]);
 });
+
+// v17: one classification pipeline for ordered actions, list items and prose.
+describe("step/list classification conflicts", () => {
+  const explain = "这里解释当前任务涉及的范围，以及为什么需要这样处理。再记录已经完成的部分，方便之后检查。相关资料应当按实际情况整理，每一次决定都应有对应依据。";
+  test("extracts seven ordered actions and splits every explanation", () => {
+    const steps = ["第一步先确认表头和附件。", "第二步用岗位代码定位，而不是只记名称。", "第三步看对象和类别。", "第四步核学历和学位。", "第五步核专业，而且要抄原字。", "第六步看需要提供的其他证明。", "第七步读备注和脚注。"];
+    const source = "# 阅读流程\n\n" + steps.map(s => s + explain.repeat(2)).join("\n\n");
+    const blocks = createBlocksFromText(source);
+    expect(headingTexts(source)).toEqual(steps);
+    expect(blocks.filter(b => b.type === "p").every(b => Array.from(b.text).length <= 80)).toBe(true);
+    blocks.forEach((b, i) => { if (b.type === "h3") expect(blocks[i - 1].type).toBe("hr"); });
+    expect(layoutPreservesSource(blocks, source)).toBe(true);
+  });
+  test("splits rejected steps and long list items without repeating markers", () => {
+    for (const prefix of ["- ", "• ", "1. ", "第一步我写了记录。"]){
+      const source = "# 记录\n\n" + prefix + "材料信息包括报名需要提交的各项证明。" + explain.repeat(2);
+      const blocks = createBlocksFromText(source);
+      expect(headingTexts(source)).toEqual([]);
+      expect(blocks.filter(b => b.type === "p").every(b => Array.from(b.text).length <= 80)).toBe(true);
+      expect(blocks.filter(b => b.text.startsWith(prefix))).toHaveLength(1);
+      expect(layoutPreservesSource(blocks, source)).toBe(true);
+    }
+  });
+  test("distinguishes task passes from repeated rehearsal and uncertain passes", () => {
+    const phases = ["第一遍只做资格筛选。", "第二遍看考试匹配。", "第三遍看时间和路程。", "第四遍才讨论个人意愿。"];
+    const source = "# 流程练习\n\n" + phases.map(s => s + explain.repeat(2)).join("\n\n");
+    expect(headingTexts(source)).toEqual(phases);
+    const practice = "# 表达训练\n\n接下来才是练习。" + explain.repeat(2) + "\n\n" + ["第一遍检查开头。请看同一份自我介绍的录音。", "第二遍整理证据。请修改稿子里的表述。", "第三遍练被打断。", "第四遍把稿子放远。"].map(s => s + explain.repeat(2)).join("\n\n");
+    expect(headingTexts(practice)).toEqual(["接下来才是练习。"]);
+    expect(headingTexts("# 记录\n\n第三遍检查未知内容。" + explain.repeat(2))).toEqual([]);
+    expect(layoutPreservesSource(createBlocksFromText(practice), practice)).toBe(true);
+  });
+  test.each(["先判断哪个环节最需要处理。", "把最重要的任务放进完整的时段。", "另一项设置最低维护，保证进度不断。", "每周只调整一次比例。", "资料也要跟着收窄。", "整理材料前，先确认提交要求。", "读文件的第一步，应该先确认用途。", "第一层看时间成本。"])("accepts action structures with explanations: %s", sentence => {
+    const source = "# 操作\n\n" + sentence + "\n\n" + explain.repeat(2);
+    expect(headingTexts(source)).toEqual([sentence]);
+    expect(layoutPreservesSource(createBlocksFromText(source), source)).toBe(true);
+  });
+  test.each(["第一场之后，别人很容易变成一面放大镜。", "点开以后，先看见的是表情僵，声音也不一样。", "第一步我写完了记录。", "第一步天气一直很好。", "第一遍我终于读完了文件。", "材料越具体，你越清楚需要核对什么。", "先判断什么？"])("keeps descriptions, relations and questions in the body: %s", sentence => {
+    expect(headingTexts("# 记录\n\n" + sentence + explain.repeat(2))).toEqual([]);
+  });
+  test("recovers wrapped numbered actions and preserves list punctuation and repeated text", () => {
+    const opening = "1. 确认需要提交的资料和具体要求。";
+    const source = "# 准备\n\n1. 确认需要提交的\n资料和具体要求。" + explain.repeat(2) + "\n\n2. 身份证\n3. 毕业证\n\n- " + "材料说明，".repeat(8) + "\n附注含数字3.14、网址https://example.com/a?x=1&y=2和😀。老师说：“外层‘内层。’仍然完整。”重复一句。重复一句。";
+    const blocks = createBlocksFromText(source);
+    expect(headingTexts(source)).toEqual([opening]);
+    expect(layoutPreservesSource(blocks, source)).toBe(true);
+    expect(blocks).toEqual(createBlocksFromText(source));
+    for (const fragment of ["2. 身份证", "3. 毕业证", "3.14", "https://example.com/a?x=1&y=2", "“外层‘内层。’仍然完整。”"]) expect(blocks.some(b => b.text.includes(fragment))).toBe(true);
+    expect(blocks.map(b => b.text).join("").match(/重复一句。/g)).toHaveLength(2);
+  });
+});
+
+ test("packs safe clauses by length instead of treating two commas as two sentences", () => {
+    const source = "# 分层说明\n\n" + "先按规则整理各类信息，包括基本条件、现实安排、通勤时间、学习意愿、时间成本，再记录需要确认的事项，包括具体要求、证明材料、报名入口、时间节点，最后按先后顺序处理，保证每项信息都能对应原来的来源。";
+    const paragraphs = body(source);
+    expect(paragraphs.every(p => Array.from(p.text).length >= 20 && Array.from(p.text).length <= 80)).toBe(true);
+    expect(paragraphs.length).toBeLessThanOrEqual(3);
+    expect(layoutPreservesSource(createBlocksFromText(source), source)).toBe(true);
+ });

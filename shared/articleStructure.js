@@ -2,6 +2,7 @@
 const markdownDividerPattern = /^-{3,}$/;
 const bulletPattern = /^(?:[-*+]\s+|[•●▪]\s*)/;
 const numberedPattern = /^(?:[一二三四五六七八九十百]+[、.．]|第[一二三四五六七八九十\d]+[步章节]|\d+[、．]|\d+\.(?!\d)|[（(]?[一二三四五六七八九十\d]+[）)])\s*/;
+const instructionOpeningPattern = /^(?:先|再|只|才|应该|要|需要|是)?(?:确认|检查|核对|判断|比较|整理|选择|准备|完成|读|看|核|用|把|进入|记录|处理|安排|筛选|评估|讨论|调整|允许|不要|别(?!人))/;
 const numberedMatterOpeningPattern = /^(?:提前准备的)?第([一二三四五六七八九十\d]+)件事[，,:：]/;
 const structuralHeadingOpeningPattern = /^(先说|先(?:别|不要|把|从|查|确认|明确|确定)|接着(?:把|从|查)|再(?:把|查|确认)|先看|再看|接着看|然后才是|首先|其次|再次|最后(?:再)?看|最后(?:是|，|,|：|:)|第[一二三四五六七八九十\d]+笔账(?:是|：|:)|第[一二三四五六七八九十\d]+周可以从|资料选择(?:也)?要|计划不要|到了周末)/;
 const sectionPivotPattern = /^(如果你(?:现在|目前|暂时)?还(?:拿不准|没想好|不确定)|如果你只是|如果[一二三四五六七八九十几\d]+(?:周|天|个月)下来|第[一二三四五六七八九十\d]+周结束时|说到底|归根结底|总的来说|最后想说|最后要说)/;
@@ -54,20 +55,18 @@ export function validateLayoutResult(blocks, source) {
 }
 
 function buildLocalBlocks(input) {
-    const lines = getTextLines(input);
+    const lines = resolveParagraphRoles(getTextLines(input));
     const blocks = [];
     let sectionTexts = [];
-    const numberedMatters = getOrderedNumberedMatterHeadingLines(lines);
-    const structuralHeadings = selectStructuralHeadings(lines, numberedMatters);
+    const structuralHeadings = selectStructuralHeadings(lines);
     lines.forEach((line, index) => {
-        if (markdownDividerPattern.test(line.text)) {
+        if (line.kind === "divider") {
             addDividerIfNeeded(blocks, "manual");
             sectionTexts = [];
             return;
         }
-        const markdown = getMarkdownHeading(line.text);
-        const type = markdown ? `h${markdown.level}` : index === 0 && isTitleLike(line, lines[index + 1])
-            ? "h1" : isSubheadingLike(line, lines[index + 1]) ? "h2" : null;
+        const markdown = line.markdown;
+        const type = line.headingType;
         if (type) {
             addDividerIfNeeded(blocks, "auto", type === "h3");
             blocks.push(makeBlock(type, markdown?.text ?? line.text));
@@ -75,8 +74,8 @@ function buildLocalBlocks(input) {
             return;
         }
         if (blocks[blocks.length - 1]?.type === "h1") addDividerIfNeeded(blocks);
-        if (isListLine(line.text)) {
-            blocks.push(makeBlock("p", line.text));
+        if (line.kind === "list") {
+            splitIntoInfoBlocks(line.text).forEach(text => blocks.push(makeBlock("p", text)));
             sectionTexts.push(line.text);
             return;
         }
@@ -111,22 +110,37 @@ function getMarkdownHeading(text) {
     const match = /^(#{1,3})\s+(.+)$/.exec(text);
     return match ? { level: match[1].length, text: match[2].trim() } : null;
 }
-function isListLine(text) {
-    return bulletPattern.test(text) || numberedPattern.test(text);
+// One lexical classifier is shared by wrap recovery, role resolution and rendering.
+function classifyLine(text) {
+    const markdown = getMarkdownHeading(text);
+    if (markdown) return { kind: "heading", markdown };
+    if (markdownDividerPattern.test(text)) return { kind: "divider" };
+    if (bulletPattern.test(text)) return { kind: "list" };
+    const sequence = /^第([一二两三四五六七八九十百\d]+)(步|遍|轮|次)/.exec(text);
+    if (sequence) return { kind: sequence[2] === "步" ? "step" : "round", sequence };
+    if (numberedPattern.test(text)) {
+        const prefix = numberedPattern.exec(text)[0];
+        // Identify the action before joining copy wraps; heading extraction still requires a complete sentence.
+        if (instructionOpeningPattern.test(text.slice(prefix.length)))
+            return { kind: "step" };
+        return { kind: "list" };
+    }
+    return { kind: "prose" };
 }
+function isListLine(text) { return classifyLine(text).kind === "list"; }
 function isFollowingBody(line) {
     return line && !isListLine(line.text) && !getMarkdownHeading(line.text) &&
         !markdownDividerPattern.test(line.text) && (lengthOf(line.text) > 22 || /[。！？!?]/.test(line.text));
 }
 function isTitleLike(line, next) {
-    if (isListLine(line.text) || lengthOf(line.text) > 40 || /[。；;，,：:]$/.test(line.text)) return false;
+    if (classifyLine(line.text).kind !== "prose" || lengthOf(line.text) > 40 || /[。；;，,：:]$/.test(line.text)) return false;
     if (sentenceRanges(line.text).length > 1) return false;
     return line.hasBlankAfter || !next || isFollowingBody(next) ||
         (lengthOf(line.text) <= 16 && !/[，,:：]/.test(line.text) && !/^(我|你|他|她|它|这|那|今天|最近|因为|如果)/.test(line.text));
 }
 function isSubheadingLike(line, next) {
     if (!line || line.isNumberedListItem || bulletPattern.test(line.text) || getMarkdownHeading(line.text) ||
-        lengthOf(line.text) > 22 || /[。！？!?；;，,]$/.test(line.text) || !isFollowingBody(next)) return false;
+        lengthOf(line.text) > 22 || /[。！？!?；;，,的与及和把将]$/.test(line.text) || !isFollowingBody(next)) return false;
     if (numberedPattern.test(line.text)) return true;
     // A noun-like label plus a following body is evidence; shortness alone isn't.
     return (line.hasBlankBefore || line.hasBlankAfter) &&
@@ -144,7 +158,8 @@ function getTextLines(input) {
         hasParagraphAfter: index === raw.length - 1 || !raw[index + 1] || hasCompleteLineEnding(text),
     }] : []);
     nonEmpty.forEach((line, index) => {
-        line.isNumberedListItem = numberedPattern.test(line.text) &&
+        Object.assign(line, classifyLine(line.text));
+        line.isNumberedListItem = line.kind === "list" && numberedPattern.test(line.text) &&
             (numberedPattern.test(nonEmpty[index - 1]?.text ?? "") || numberedPattern.test(nonEmpty[index + 1]?.text ?? ""));
     });
     const lines = [];
@@ -156,11 +171,11 @@ function getTextLines(input) {
         pending = [];
     };
     nonEmpty.forEach((line, index) => {
-        const ownLine = markdownDividerPattern.test(line.text) || getMarkdownHeading(line.text) ||
-            isListLine(line.text) || isSubheadingLike(line, nonEmpty[index + 1]) ||
-            (index === 0 && isTitleLike(line, nonEmpty[index + 1]));
-        if (line.hasBlankBefore || ownLine) flush();
-        if (ownLine) lines.push(line);
+        const label = isSubheadingLike(line, nonEmpty[index + 1]) || (index === 0 && isTitleLike(line, nonEmpty[index + 1]));
+        const startsItem = ["list", "step", "round"].includes(line.kind);
+        if (line.hasBlankBefore || startsItem || line.kind === "heading" || line.kind === "divider" || label) flush();
+        const shortList = line.kind === "list" && lengthOf(line.text) <= 22;
+        if (line.kind === "heading" || line.kind === "divider" || label || shortList) lines.push(line);
         else {
             pending.push(line);
             if (line.hasParagraphAfter) flush();
@@ -217,22 +232,41 @@ function boundaryRanges(text, soft = false) {
 }
 function sentenceRanges(text) { return boundaryRanges(text); }
 // Extract only a whole opening sentence; all offsets refer to the original line.
-function extractHeadingCandidate(text, allowNumberedMatter) {
+function extractHeadingCandidate(text, allowNumberedMatter, role = {}) {
     const first = sentenceRanges(text)[0];
     if (!first?.complete) return null;
     const heading = text.slice(0, first.end).trim();
     if (lengthOf(heading) > 40 || /[？?]/.test(heading)) return null;
-    const category = classifyHeading(heading, allowNumberedMatter);
+    const category = classifyHeading(heading, allowNumberedMatter, role);
     if (!category || lengthOf(heading) < (category.shortStep ? 5 : 8)) return null;
     return { heading, remainder: text.slice(first.end).trim(), end: first.end, ...category };
 }
 
-function classifyHeading(heading, allowNumberedMatter) {
-    // Repeated practice rounds are details within a method, not new major sections.
-    if (/^第[一二三四五六七八九十\d]+(?:遍|轮|次)/.test(heading)) return null;
+function classifyHeading(heading, allowNumberedMatter, role = {}) {
+    if (role.kind === "round") return role.majorRound ? { category: "phase", priority: 11, shortStep: true } : null;
+    if (role.kind === "step") {
+        const actionText = heading.replace(/^第[一二两三四五六七八九十百\d]+步[，,:：]?|^(?:\d+[.、．]|[一二三四五六七八九十]+[、.．])\s*/, "");
+        if (/^(?:我|他|她|昨天|今天)|^(?:先|再|只|才)?(?:看见|听见|发现|想起)/.test(actionText)) return null;
+        return instructionOpeningPattern.test(actionText) ? { category: "numbered-step", priority: 11, shortStep: true } : null;
+    }
     if (/^(?:我|他|她|昨天|今天|刚才|后来)/.test(heading)) return null;
     if (/^(?:首先|其次|再次|最后)[，,：:]?(?:我|他|她|大家)|^(?:开头|开场|中间部分|结尾|收尾)用[了过]/.test(heading)) return null;
+    if (/^[^。]{0,18}[，,]先(?:看见|听见|发现|想起)的是/.test(heading)) return null;
     const action = /用|要|把|围绕|交代|选择|决定|明确|整理|完成|检查|核对|确认|准备|判断|练|换|做|看|留下|记录|投递/;
+    const directedAction = /^(?:先|再|接着|随后|优先)(?:判断|确认|比较|分析|整理|排除|确定|处理|检查|核对|选择|调整|记录|安排|分清|完成|明确|了解|只找|做|读)/.test(heading);
+    const objectAction = /^把.{2,22}(?:放进|放在|安排|分成|改成|分开|留给|拆成|缩小|写下|说清|整理|对齐)/.test(heading) ||
+        /^(?:另一(?:项|门|科|类|部分|种)|剩下的.{1,8})(?:要|需要|只|先|设置|安排|保持|分配|留|改)/.test(heading);
+    const taskAction = /^[^，,。]{2,14}(?:前|后|时|期间)[，,](?:(?:可以|不妨)(?:先|再)?(?:让|把|做|停止)|(?:先|再|也别|不要|别(?!人)|要)(?!看见|听见|发现|想起))/.test(heading) ||
+        /^[^，,。]{2,14}(?:前|期间)(?:的)?[^，,。]{0,12}(?:也别忽略|需要准备|要检查)/.test(heading) ||
+        /^[^，,。]{2,16}[，,]?(?:则要|也要|需要)(?:先|跟着|保留|核对|确认|分清|收窄|说明|完成)/.test(heading);
+    const scheduledAction = /^(?:每周|每天|每月)(?:只|先|再|要|需要|调整|检查|复盘)/.test(heading);
+    const initialAction = /^(?:准备|处理|安排|开展|读|核对)[^，,。]{1,12}的第一步[，,]/.test(heading) ||
+        /^(?:所以)?[^，,。]{2,12}第一步不是.{2,24}而是/.test(heading) ||
+        /^要.{2,12}[，,]第一步不是.{2,24}而是/.test(heading);
+    const orderedDimension = /^第[一二两三四五六七八九十\d]+层(?:先|再|只)?(?:看|比较|判断|核对)/.test(heading);
+    const earliestAction = /^最先(?:核对|确认|检查|判断)的是/.test(heading);
+    if (directedAction || objectAction || scheduledAction || initialAction || taskAction || orderedDimension || earliestAction)
+        return { category: "action", priority: 10, shortStep: true };
     const position = /^(?:开头|开场|中间(?:部分)?|结尾|收尾)(?:用|要|不要|别|把|围绕|先|只|可以)/.test(heading);
     const dimension = /^(?:先|再|接着)看/.test(heading) ||
         /^还有(?:一个|一笔|一项|一种).{0,10}(?:账|成本|条件|问题|维度)[：:]/.test(heading);
@@ -263,19 +297,67 @@ function classifyHeading(heading, allowNumberedMatter) {
     return null;
 }
 
-function selectStructuralHeadings(lines, numberedMatters) {
-    const explicitType = (line, index) => getMarkdownHeading(line.text) ||
-        (index === 0 && isTitleLike(line, lines[index + 1])) || isSubheadingLike(line, lines[index + 1]);
-    const extracted = lines.map((line, index) => !explicitType(line, index) && !isListLine(line.text) &&
-        !markdownDividerPattern.test(line.text) ? extractHeadingCandidate(line.text, numberedMatters.has(line.text)) : null);
+function resolveParagraphRoles(lines) {
+    const numberedMatters = getOrderedNumberedMatterHeadingLines(lines);
+    const roles = lines.map((line, index) => {
+        const shape = classifyLine(line.text);
+        const headingType = shape.markdown ? `h${shape.markdown.level}` : index === 0 && isTitleLike(line, lines[index + 1])
+            ? "h1" : isSubheadingLike(line, lines[index + 1]) ? "h2" : null;
+        return { ...line, ...shape, headingType, majorRound: false };
+    });
+    // Consecutive passes can mean distinct decisions OR repetitions of the same exercise.
+    // Require a sequence with different action objects; recording/rehearsal passes stay details.
+    let run = [], practiceContext = false;
+    const approve = () => {
+        const eligible = run.filter(r => r.object && !r.practice);
+        if (eligible.length >= 2 && new Set(eligible.map(r => r.object)).size >= 2)
+            eligible.forEach(r => { r.line.majorRound = true; });
+        run = [];
+    };
+    for (const line of roles) {
+        if (line.headingType || line.kind === "divider") { approve(); practiceContext = line.headingType !== "h1" && /练习|演练|录制/.test(line.text); }
+        const first = sentenceRanges(line.text)[0];
+        const opening = first?.complete ? line.text.slice(0, first.end) : "";
+        if (/^(?:接下来|下一步|然后|开始)/.test(opening)) {
+            if (/练习|演练|录制/.test(opening)) practiceContext = true;
+            else if (classifyHeading(opening, false, line)) { approve(); practiceContext = false; }
+        }
+        if (line.kind !== "round") continue;
+        const [, ordinal, unit] = line.sequence;
+        const number = parseOrdinal(ordinal);
+        const actionText = opening.slice(line.sequence[0].length).replace(/^(?:只|先|再|才)/, "");
+        const action = /^(?:做|看|核对|检查|确认|判断|比较|筛选|评估|讨论|整理)(.{2,})[。！!]$/.exec(actionText);
+        const practice = practiceContext || /录音|录像|镜子|稿子|被打断|重说|重录|发音|背诵|背稿|语速|自我介绍|同一份|从.{0,12}开始说/.test(line.text);
+        const last = run[run.length - 1];
+        if (last && (last.unit !== unit || number !== last.number + 1)) approve();
+        run.push({ line, number, unit, object: action?.[1], practice });
+    }
+    approve();
+    roles.forEach(line => {
+        line.candidate = !line.headingType && !["list", "divider"].includes(line.kind)
+            ? extractHeadingCandidate(line.text, numberedMatters.has(line.text), line) : null;
+        line.reason = line.headingType ? "explicit-or-label-heading" : line.kind === "list" ? "list-item" :
+            line.kind === "round" && !line.majorRound ? "practice-or-uncertain-round" : line.candidate?.category ?? "body";
+    });
+    return roles;
+}
+
+function parseOrdinal(text) {
+    if (/^\d+$/.test(text)) return Number(text);
+    const digits = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+    if (text.includes("十")) { const [tens, units] = text.split("十"); return (digits[tens] ?? 1) * 10 + (digits[units] ?? 0); }
+    return digits[text] ?? null;
+}
+
+function selectStructuralHeadings(lines) {
     const candidates = [];
     let offset = 0, group = 0;
     lines.forEach((line, index) => {
-        if (explicitType(line, index)) { group += 1; return; }
-        if (markdownDividerPattern.test(line.text)) return;
-        const candidate = extracted[index];
+        if (line.headingType) { group += 1; return; }
+        if (line.kind === "divider") return;
+        const candidate = line.candidate;
         const hasBody = candidate && (isFollowingBody({ text: candidate.remainder }) ||
-            (!candidate.remainder && isFollowingBody(lines[index + 1]) && !extracted[index + 1]));
+            (!candidate.remainder && isFollowingBody(lines[index + 1]) && !lines[index + 1]?.candidate));
         if (hasBody) candidates.push({ ...candidate, index, group, start: offset,
             bodyStart: offset + lengthOf(line.text.slice(0, candidate.end)) });
         offset += lengthOf(line.text);
@@ -294,11 +376,11 @@ function selectStructuralHeadings(lines, numberedMatters) {
     return new Map(selected.map(candidate => [candidate.index, candidate]));
 }
 function splitIntoInfoBlocks(text) {
-    const units = sentenceRanges(text).flatMap((range) => {
+    const units = sentenceRanges(text).flatMap((range, sentenceIndex) => {
         const sentence = text.slice(range.start, range.end);
         return lengthOf(sentence) > 80 ? boundaryRanges(sentence, true).map((part) => ({
-            start: range.start + part.start, end: range.start + part.end,
-        })) : [range];
+            start: range.start + part.start, end: range.start + part.end, sentenceIndex, clause: true,
+        })) : [{ ...range, sentenceIndex }];
     });
     const blocks = [];
     let current = null, count = 0;
@@ -307,7 +389,8 @@ function splitIntoInfoBlocks(text) {
         const currentLength = lengthOf(text.slice(current.start, current.end));
         const combinedLength = lengthOf(text.slice(current.start, unit.end));
         const standalone = currentLength >= 12 && emphasisScore(text.slice(current.start, current.end))?.score >= 9;
-        if (!standalone && count < 2 && (combinedLength <= 65 || (currentLength < 20 && combinedLength <= 80))) {
+        const sameLongSentence = unit.clause && unit.sentenceIndex === current.sentenceIndex;
+        if (!standalone && (sameLongSentence || count < 2) && (combinedLength <= 65 || (currentLength < 20 && combinedLength <= 80))) {
             current.end = unit.end; count += 1;
         } else { blocks.push(current); current = { ...unit }; count = 1; }
     }
