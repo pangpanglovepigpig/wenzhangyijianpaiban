@@ -327,7 +327,7 @@ function resolveParagraphRoles(lines) {
         const number = parseOrdinal(ordinal);
         const actionText = opening.slice(line.sequence[0].length).replace(/^(?:只|先|再|才)/, "");
         const action = /^(?:做|看|核对|检查|确认|判断|比较|筛选|评估|讨论|整理)(.{2,})[。！!]$/.exec(actionText);
-        const practice = practiceContext || /录音|录像|镜子|稿子|被打断|重说|重录|发音|背诵|背稿|语速|自我介绍|同一份|从.{0,12}开始说/.test(line.text);
+        const practice = practiceContext || /录音|录像|镜子|稿子|被打断|重说|重录|发音|背诵|背稿|语速|自我介绍|从.{0,12}开始说/.test(line.text);
         const last = run[run.length - 1];
         if (last && (last.unit !== unit || number !== last.number + 1)) approve();
         run.push({ line, number, unit, object: action?.[1], practice });

@@ -236,7 +236,7 @@ describe("step/list classification conflicts", () => {
   });
   test("distinguishes task passes from repeated rehearsal and uncertain passes", () => {
     const phases = ["第一遍只做资格筛选。", "第二遍看考试匹配。", "第三遍看时间和路程。", "第四遍才讨论个人意愿。"];
-    const source = "# 流程练习\n\n" + phases.map(s => s + explain.repeat(2)).join("\n\n");
+    const source = "# 流程练习\n\n" + phases.map(s => s + "每一遍都核对同一份岗位表。" + explain.repeat(2)).join("\n\n");
     expect(headingTexts(source)).toEqual(phases);
     const practice = "# 表达训练\n\n接下来才是练习。" + explain.repeat(2) + "\n\n" + ["第一遍检查开头。请看同一份自我介绍的录音。", "第二遍整理证据。请修改稿子里的表述。", "第三遍练被打断。", "第四遍把稿子放远。"].map(s => s + explain.repeat(2)).join("\n\n");
     expect(headingTexts(practice)).toEqual(["接下来才是练习。"]);
